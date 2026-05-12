@@ -1,7 +1,8 @@
-Django
-djangorestframework
-django-cors-headers
-psycopg2-binary
-python-decouple
-requests
-gunicorn
+django==6.0.5
+djangorestframework==3.17.1
+djangorestframework-simplejwt==5.5.1
+django-cors-headers==4.9.0
+psycopg==3.3.4
+psycopg-binary==3.3.4
+python-dotenv==1.2.2
+pillow==12.2.0
