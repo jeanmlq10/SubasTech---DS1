@@ -5,7 +5,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import User
-from accounts.permissions import IsPlatformAdminOrReadOnly
+from accounts.permissions import IsAdminOrTechnicianProfileOwnerOrReadOnly, IsPlatformAdminOrReadOnly
 from .models import Category, Service, ServicePhoto, TechnicianProfile, Zone
 from .serializers import (
     CategorySerializer,
@@ -32,10 +32,17 @@ class ZoneViewSet(viewsets.ModelViewSet):
 class TechnicianProfileViewSet(viewsets.ModelViewSet):
     queryset = TechnicianProfile.objects.select_related("user").prefetch_related("zones")
     serializer_class = TechnicianProfileSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAdminOrTechnicianProfileOwnerOrReadOnly]
 
     def perform_create(self, serializer):
+        self._ensure_technician(self.request.user)
+        if TechnicianProfile.objects.filter(user=self.request.user).exists():
+            raise ValidationError({"detail": "This user already has a technician profile."})
         serializer.save(user=self.request.user)
+
+    def perform_update(self, serializer):
+        self._ensure_technician(serializer.instance.user)
+        serializer.save()
 
 
 class TechnicianOnboardingAPIView(APIView):
@@ -76,7 +83,7 @@ class TechnicianOnboardingAPIView(APIView):
 class ServiceViewSet(viewsets.ModelViewSet):
     queryset = Service.objects.select_related("technician__user", "category").prefetch_related("technician__zones", "photos")
     serializer_class = ServiceSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [IsPlatformAdminOrReadOnly]
 
 
 class TechnicianServiceViewSet(viewsets.ModelViewSet):

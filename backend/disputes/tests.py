@@ -110,3 +110,78 @@ class DisputeAssistantTests(TestCase):
         self.assertEqual(payload["classification"], "pricing_or_payment")
         self.assertEqual(payload["suggested_priority"], "normal")
         self.assertTrue(payload["recommended_review_steps"])
+
+
+class DisputePermissionTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        user_model = get_user_model()
+        self.client_user = user_model.objects.create_user(username="client-a", password="Password123", role="client")
+        self.other_client = user_model.objects.create_user(username="client-b", password="Password123", role="client")
+        self.tech_user = user_model.objects.create_user(username="tech-a", password="Password123", role="technician")
+        self.other_tech_user = user_model.objects.create_user(username="tech-b", password="Password123", role="technician")
+        category = Category.objects.create(name="Electrician", slug="electrician-sec")
+        self.profile = TechnicianProfile.objects.create(user=self.tech_user, is_verified=True)
+        other_profile = TechnicianProfile.objects.create(user=self.other_tech_user, is_verified=True)
+        service = Service.objects.create(
+            technician=self.profile,
+            category=category,
+            title="Revision electrica",
+            description="Diagnostico general.",
+            base_price=80000,
+        )
+        other_service = Service.objects.create(
+            technician=other_profile,
+            category=category,
+            title="Otro servicio",
+            description="Otro diagnostico.",
+            base_price=70000,
+        )
+        self.dispute = Dispute.objects.create(
+            client=self.client_user,
+            technician=self.profile,
+            service=service,
+            title="Caso visible",
+            description="Problema con el servicio.",
+        )
+        self.hidden_dispute = Dispute.objects.create(
+            client=self.other_client,
+            technician=other_profile,
+            service=other_service,
+            title="Caso oculto",
+            description="No debe verse.",
+        )
+
+    def test_client_only_sees_own_disputes(self):
+        self.client.force_authenticate(self.client_user)
+
+        response = self.client.get("/api/disputes/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()), 1)
+        self.assertEqual(response.json()[0]["id"], self.dispute.id)
+
+    def test_technician_only_sees_assigned_disputes(self):
+        self.client.force_authenticate(self.tech_user)
+
+        response = self.client.get("/api/disputes/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()), 1)
+        self.assertEqual(response.json()[0]["id"], self.dispute.id)
+
+    def test_technician_cannot_create_dispute_as_client(self):
+        self.client.force_authenticate(self.tech_user)
+
+        response = self.client.post(
+            "/api/disputes/",
+            {
+                "technician": self.profile.id,
+                "service": self.dispute.service_id,
+                "title": "Intento invalido",
+                "description": "No deberia crear disputa con rol tecnico.",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)

@@ -13,11 +13,20 @@ class UserSerializer(serializers.ModelSerializer):
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=8)
+    allowed_public_roles = {User.Role.CLIENT, User.Role.TECHNICIAN}
 
     class Meta:
         model = User
         fields = ["id", "username", "email", "password", "role", "phone_number"]
         read_only_fields = ["id"]
+
+    def validate_role(self, value):
+        if value not in self.allowed_public_roles:
+            allowed = ", ".join(sorted(self.allowed_public_roles))
+            raise serializers.ValidationError(
+                f"Public registration is only allowed for these roles: {allowed}."
+            )
+        return value
 
     def create(self, validated_data):
         password = validated_data.pop("password")
