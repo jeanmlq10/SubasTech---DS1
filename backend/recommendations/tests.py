@@ -35,7 +35,13 @@ class RecommendationEngineTests(TestCase):
             description="Servicio residencial",
             base_price=80000,
         )
-        Rating.objects.create(technician=profile, client=client, service=service, score=5)
+        Rating.objects.create(
+            author=client,
+            technician=profile,
+            service=service,
+            target_role=Rating.TargetRole.TECHNICIAN,
+            score=5,
+        )
 
         results = list(recommend_services(RecommendationRequest(category="electrician", location="Riomar", urgency="high")))
 

@@ -37,7 +37,13 @@ class AdminSummaryTests(TestCase):
             description="Servicio residencial",
             base_price=80000,
         )
-        Rating.objects.create(technician=profile, client=self.client_user, service=service, score=5)
+        Rating.objects.create(
+            author=self.client_user,
+            technician=profile,
+            service=service,
+            target_role=Rating.TargetRole.TECHNICIAN,
+            score=5,
+        )
         Dispute.objects.create(
             client=self.client_user,
             technician=profile,

@@ -5,6 +5,7 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from accounts.models import User
 from catalog.models import Service
 from leads.models import ServiceLead
 from recommendations.services import RecommendationRequest, recommend_services
@@ -87,8 +88,10 @@ class WhatsAppWebhookView(APIView):
 
         recommendation = conversation.last_recommendations[index]
         service = Service.objects.select_related("technician", "category").get(pk=recommendation["service_id"])
+        client_user = User.objects.filter(phone_number=sender).first() or User.objects.filter(whatsapp_id=sender).first()
         lead = ServiceLead.objects.create(
             technician=service.technician,
+            client_user=client_user,
             service=service,
             client_phone=sender,
             message=conversation.last_message,

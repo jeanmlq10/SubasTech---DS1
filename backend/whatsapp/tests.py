@@ -31,7 +31,12 @@ class WhatsAppWebhookTests(TestCase):
             first_name="Carlos",
             last_name="Mendoza",
         )
-        client_user = user_model.objects.create_user(username="client-whatsapp", password="Password123", role="client")
+        client_user = user_model.objects.create_user(
+            username="client-whatsapp",
+            password="Password123",
+            role="client",
+            phone_number="573001112233",
+        )
         profile = TechnicianProfile.objects.create(
             user=tech_user,
             is_verified=True,
@@ -48,7 +53,13 @@ class WhatsAppWebhookTests(TestCase):
             description="Servicio residencial",
             base_price=80000,
         )
-        Rating.objects.create(technician=profile, client=client_user, service=service, score=5)
+        Rating.objects.create(
+            author=client_user,
+            technician=profile,
+            service=service,
+            target_role=Rating.TargetRole.TECHNICIAN,
+            score=5,
+        )
 
     def test_verifies_webhook_challenge(self):
         response = self.client.get(
@@ -102,6 +113,7 @@ class WhatsAppWebhookTests(TestCase):
         self.assertEqual(ServiceLead.objects.count(), 1)
         lead = ServiceLead.objects.first()
         self.assertEqual(lead.client_phone, "573001112233")
+        self.assertEqual(lead.client_user.username, "client-whatsapp")
         self.assertEqual(lead.status, ServiceLead.Status.NEW)
         self.assertIn("Enviamos tu solicitud", selection_response.json()["reply_text"])
 

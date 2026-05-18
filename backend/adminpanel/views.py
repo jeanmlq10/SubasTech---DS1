@@ -18,7 +18,7 @@ class AdminSummaryAPIView(APIView):
         services = Service.objects.select_related("category", "technician__user")
         disputes = Dispute.objects.select_related("client", "technician__user", "service")
 
-        average_rating = Rating.objects.aggregate(value=Avg("score"))["value"] or 0
+        average_rating = Rating.objects.filter(target_role=Rating.TargetRole.TECHNICIAN).aggregate(value=Avg("score"))["value"] or 0
         metrics = {
             "total_technicians": technicians.count(),
             "verified_technicians": technicians.filter(is_verified=True).count(),
@@ -35,7 +35,7 @@ class AdminSummaryAPIView(APIView):
 
         recent_technicians = technicians.annotate(
             service_count=Count("services", distinct=True),
-            avg_rating=Avg("ratings__score"),
+            avg_rating=Avg("ratings__score", filter=Q(ratings__target_role=Rating.TargetRole.TECHNICIAN)),
         ).order_by("-created_at")[:5]
 
         recent_services = services.order_by("-created_at")[:5]
@@ -149,7 +149,10 @@ class AdminTechnicianActionAPIView(APIView):
         annotated = (
             TechnicianProfile.objects.select_related("user")
             .prefetch_related("zones")
-            .annotate(service_count=Count("services", distinct=True), avg_rating=Avg("ratings__score"))
+            .annotate(
+                service_count=Count("services", distinct=True),
+                avg_rating=Avg("ratings__score", filter=Q(ratings__target_role=Rating.TargetRole.TECHNICIAN)),
+            )
             .get(pk=technician.pk)
         )
         return Response(AdminSummaryAPIView()._technician_payload(annotated))

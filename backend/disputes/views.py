@@ -7,12 +7,14 @@ from rest_framework.views import APIView
 
 from accounts.models import User
 from accounts.permissions import IsPlatformArbiter
+from reputation.services import evaluate_automatic_penalties
 from .models import Dispute
 from .serializers import ArbiterDecisionSerializer, ArbiterDisputeSerializer, DisputeSerializer
 from .services import summarize_dispute
 
 
 class DisputeViewSet(viewsets.ModelViewSet):
+    queryset = Dispute.objects.all()
     serializer_class = DisputeSerializer
     permission_classes = [permissions.IsAuthenticated]
 
@@ -85,6 +87,7 @@ class ArbiterDecisionAPIView(APIView):
             arbiter=request.user,
             notes=serializer.validated_data.get("notes", ""),
         )
+        evaluate_automatic_penalties(dispute.technician)
         return Response(ArbiterDisputeSerializer(dispute).data)
 
 

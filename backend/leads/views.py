@@ -3,6 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
+from reputation.services import evaluate_automatic_penalties
 from .models import ServiceLead
 from .serializers import ServiceLeadSerializer, TechnicianLeadStatusSerializer
 
@@ -24,4 +25,5 @@ class TechnicianLeadViewSet(viewsets.ReadOnlyModelViewSet):
         serializer.is_valid(raise_exception=True)
         lead.status = serializer.validated_data["status"]
         lead.save(update_fields=["status", "updated_at"])
+        evaluate_automatic_penalties(lead.technician)
         return Response(ServiceLeadSerializer(lead).data)
