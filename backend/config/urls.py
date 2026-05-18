@@ -22,7 +22,6 @@ from leads.views import TechnicianLeadViewSet
 from notifications.views import NotificationViewSet
 from recommendations.views import RecommendationAPIView
 from reputation.views import PenaltyViewSet, RatingViewSet
-from whatsapp.views import WhatsAppWebhookView
 from config.views import HealthAPIView
 
 router = DefaultRouter()
@@ -53,7 +52,7 @@ urlpatterns = [
     path("api/arbiter/disputes/<int:pk>/decision/", ArbiterDecisionAPIView.as_view(), name="arbiter_decision"),
     path("api/technician/onboarding/", TechnicianOnboardingAPIView.as_view(), name="technician_onboarding"),
     path("api/recommendations/", RecommendationAPIView.as_view(), name="recommendations"),
-    path("api/whatsapp/webhook/", WhatsAppWebhookView.as_view(), name="whatsapp_webhook"),
+    path("api/telegram/", include("telegram_bot.urls")),
     path("api/", include(router.urls)),
 ]
 
