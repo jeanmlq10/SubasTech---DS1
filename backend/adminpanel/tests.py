@@ -2,6 +2,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
 
+from audit.models import AuditEvent
 from catalog.models import Category, Service, TechnicianProfile, Zone
 from disputes.models import Dispute
 from reputation.models import Rating
@@ -100,6 +101,7 @@ class AdminTechnicianActionTests(TestCase):
         self.assertEqual(activate_response.status_code, 200)
         self.tech_user.refresh_from_db()
         self.assertTrue(self.tech_user.is_active)
+        self.assertEqual(AuditEvent.objects.filter(event_type=AuditEvent.EventType.ADMIN_ACTION).count(), 3)
 
     def test_non_admin_cannot_moderate_technician(self):
         self.client.force_authenticate(self.client_user)

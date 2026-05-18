@@ -2,6 +2,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
+from audit.models import AuditEvent
 from catalog.models import Category, Service, TechnicianProfile, Zone
 from reputation.models import Rating
 from leads.models import ServiceLead
@@ -116,6 +117,9 @@ class WhatsAppWebhookTests(TestCase):
         self.assertEqual(lead.client_user.username, "client-whatsapp")
         self.assertEqual(lead.status, ServiceLead.Status.NEW)
         self.assertIn("Enviamos tu solicitud", selection_response.json()["reply_text"])
+        self.assertTrue(AuditEvent.objects.filter(event_type=AuditEvent.EventType.WEBHOOK_RECEIVED).exists())
+        self.assertTrue(AuditEvent.objects.filter(event_type=AuditEvent.EventType.LEAD_CREATED).exists())
+        self.assertTrue(AuditEvent.objects.filter(event_type=AuditEvent.EventType.MESSAGE_SENT).exists())
 
     def test_builds_fallback_reply_when_no_recommendations_exist(self):
         reply = build_recommendation_reply({"category": "plumber", "location": "Boston"}, [])

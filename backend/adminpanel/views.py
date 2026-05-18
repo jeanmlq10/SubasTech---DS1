@@ -5,6 +5,8 @@ from rest_framework.views import APIView
 
 from accounts.models import User
 from accounts.permissions import IsPlatformAdmin
+from audit.models import AuditEvent
+from audit.services import log_audit_event
 from catalog.models import Category, Service, TechnicianProfile, Zone
 from disputes.models import Dispute
 from reputation.models import Rating
@@ -145,6 +147,17 @@ class AdminTechnicianActionAPIView(APIView):
             technician.user.save(update_fields=["is_active"])
         else:
             return Response({"detail": "Unsupported technician action."}, status=status.HTTP_400_BAD_REQUEST)
+
+        log_audit_event(
+            event_type=AuditEvent.EventType.ADMIN_ACTION,
+            actor=request.user,
+            source="adminpanel.technician_action",
+            entity_type="technician",
+            entity_id=technician.id,
+            status="success",
+            message="Administrator executed technician moderation action",
+            metadata={"action": action, "target_user_id": technician.user_id},
+        )
 
         annotated = (
             TechnicianProfile.objects.select_related("user")

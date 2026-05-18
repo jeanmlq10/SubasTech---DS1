@@ -2,6 +2,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
 
+from audit.models import AuditEvent
 from catalog.models import Category, Service, TechnicianProfile
 from .models import Dispute
 from .services import build_dispute_assistant_payload, classify_dispute
@@ -77,6 +78,8 @@ class ArbiterWorkflowTests(TestCase):
         self.assertEqual(self.dispute.status, Dispute.Status.RESOLVED)
         self.assertEqual(self.dispute.decision, Dispute.Decision.FAVOR_CLIENT)
         self.assertEqual(self.dispute.arbiter_notes, "Evidence supports the client.")
+        self.assertTrue(AuditEvent.objects.filter(event_type=AuditEvent.EventType.DISPUTE_CLAIMED, entity_id=str(self.dispute.id)).exists())
+        self.assertTrue(AuditEvent.objects.filter(event_type=AuditEvent.EventType.DISPUTE_RESOLVED, entity_id=str(self.dispute.id)).exists())
 
     def test_invalid_pending_decision_is_rejected(self):
         self.client.force_authenticate(self.arbiter)
@@ -185,3 +188,20 @@ class DisputePermissionTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 403)
+
+    def test_client_dispute_creation_creates_audit_event(self):
+        self.client.force_authenticate(self.client_user)
+
+        response = self.client.post(
+            "/api/disputes/",
+            {
+                "technician": self.profile.id,
+                "service": self.dispute.service_id,
+                "title": "Nuevo caso",
+                "description": "Creado desde test.",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(AuditEvent.objects.filter(event_type=AuditEvent.EventType.DISPUTE_CREATED).exists())

@@ -5,6 +5,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
+from audit.views import AuditEventViewSet
 from accounts.views import MeAPIView, RegisterAPIView
 from adminpanel.views import AdminSummaryAPIView, AdminTechnicianActionAPIView
 from catalog.views import (
@@ -27,6 +28,7 @@ from config.views import HealthAPIView
 router = DefaultRouter()
 router.register("categories", CategoryViewSet)
 router.register("zones", ZoneViewSet)
+router.register("audit/events", AuditEventViewSet, basename="audit-events")
 router.register("technicians", TechnicianProfileViewSet)
 router.register("services", ServiceViewSet)
 router.register("technician/services", TechnicianServiceViewSet, basename="technician-services")

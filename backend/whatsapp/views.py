@@ -6,6 +6,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.models import User
+from audit.models import AuditEvent
+from audit.services import log_audit_event
 from catalog.models import Service
 from leads.models import ServiceLead
 from recommendations.services import RecommendationRequest, recommend_services
@@ -26,6 +28,16 @@ class WhatsAppWebhookView(APIView):
     def post(self, request):
         message = self._extract_message_text(request.data).strip()
         sender = self._extract_sender(request.data)
+        log_audit_event(
+            event_type=AuditEvent.EventType.WEBHOOK_RECEIVED,
+            channel="whatsapp",
+            source="whatsapp.webhook",
+            entity_type="conversation",
+            entity_id=sender or "unknown",
+            status="info",
+            message="WhatsApp webhook payload received",
+            metadata={"sender": sender, "has_message": bool(message)},
+        )
 
         if not message:
             return Response({"detail": "No inbound text message found", "ignored": True}, status=status.HTTP_200_OK)
@@ -57,6 +69,8 @@ class WhatsAppWebhookView(APIView):
                 },
             )
         send_result = WhatsAppCloudClient().send_text(sender, reply_text) if sender else None
+        if send_result:
+            self._log_send_result(sender=sender, send_result=send_result, context="recommendations")
 
         return Response(
             {
@@ -78,6 +92,7 @@ class WhatsAppWebhookView(APIView):
         if index < 0 or index >= len(conversation.last_recommendations):
             reply_text = "No reconozco esa opcion. Responde con uno de los numeros de la lista enviada."
             send_result = WhatsAppCloudClient().send_text(sender, reply_text)
+            self._log_send_result(sender=sender, send_result=send_result, context="invalid_selection")
             return {
                 "sender": sender,
                 "selection": selection,
@@ -100,11 +115,23 @@ class WhatsAppWebhookView(APIView):
             urgency=conversation.last_intent.get("urgency", "normal"),
             metadata={"selected_option": selection, "recommendation": recommendation},
         )
+        log_audit_event(
+            event_type=AuditEvent.EventType.LEAD_CREATED,
+            actor=client_user,
+            channel="whatsapp",
+            source="whatsapp.selection",
+            entity_type="lead",
+            entity_id=lead.id,
+            status="success",
+            message="Lead created from WhatsApp technician selection",
+            metadata={"sender": sender, "selection": selection, "technician_id": service.technician_id, "service_id": service.id},
+        )
         reply_text = (
             f"Listo. Enviamos tu solicitud a {recommendation['technician_name']} para {recommendation['service_title']}. "
             "El tecnico podra contactarte por WhatsApp."
         )
         send_result = WhatsAppCloudClient().send_text(sender, reply_text)
+        self._log_send_result(sender=sender, send_result=send_result, context="lead_created")
         return {
             "sender": sender,
             "selection": selection,
@@ -128,6 +155,25 @@ class WhatsAppWebhookView(APIView):
             return payload["entry"][0]["changes"][0]["value"]["messages"][0]["from"]
         except (KeyError, IndexError, TypeError):
             return ""
+
+    def _log_send_result(self, *, sender: str, send_result, context: str):
+        log_audit_event(
+            event_type=AuditEvent.EventType.MESSAGE_SENT if send_result.sent or send_result.dry_run else AuditEvent.EventType.INTEGRATION_ERROR,
+            channel="whatsapp",
+            source="whatsapp.send_text",
+            entity_type="conversation",
+            entity_id=sender,
+            status="success" if send_result.sent else ("dry_run" if send_result.dry_run else "error"),
+            message=f"WhatsApp outbound message processed during {context}",
+            metadata={
+                "context": context,
+                "sent": send_result.sent,
+                "dry_run": send_result.dry_run,
+                "payload": send_result.payload,
+                "response": send_result.response,
+                "error": send_result.error,
+            },
+        )
 
 
 def build_recommendation_reply(intent: dict, recommendations: list[dict]) -> str:
