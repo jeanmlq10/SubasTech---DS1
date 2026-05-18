@@ -1,7 +1,7 @@
 from django.db import models
 
 
-class WhatsAppConversation(models.Model):
+class TelegramConversation(models.Model):
     phone_number = models.CharField(max_length=40, unique=True)
     last_message = models.TextField(blank=True)
     last_intent = models.JSONField(default=dict, blank=True)

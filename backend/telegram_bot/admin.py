@@ -1,5 +1,5 @@
 from django.contrib import admin
 
-from .models import WhatsAppConversation
+from .models import TelegramConversation
 
-admin.site.register(WhatsAppConversation)
+admin.site.register(TelegramConversation)

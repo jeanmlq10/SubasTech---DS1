@@ -129,4 +129,5 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 TELEGRAM_BOT_TOKEN = env("TELEGRAM_BOT_TOKEN", default="")
-TELEGRAM_DRY_RUN = env.bool("TELEGRAM_DRY_RUN", default=True)
+TELEGRAM_DRY_RUN = env("TELEGRAM_DRY_RUN", default="True").lower() == "true"
+GEMINI_API_KEY = env("GEMINI_API_KEY", default="")

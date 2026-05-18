@@ -4,7 +4,7 @@ import requests
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.conf import settings
-import anthropic
+from .ai import extract_intent
 
 logger = logging.getLogger(__name__)
 conversation_states = {}
@@ -30,32 +30,6 @@ def telegram_webhook(request):
             logger.error(f"Error en webhook: {e}")
             return JsonResponse({"ok": False, "error": str(e)}, status=500)
     return JsonResponse({"status": "SubasTech Telegram Bot activo"})
-
-
-def extract_intent(message: str) -> dict:
-    try:
-        client = anthropic.Anthropic()
-        response = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=300,
-            messages=[{
-                "role": "user",
-                "content": f"""Extrae la intención del siguiente mensaje de un usuario
-                que solicita servicios técnicos del hogar en Barranquilla, Colombia.
-                Responde SOLO con JSON válido, sin texto adicional:
-                {{
-                  "accion": "agendar|cancelar|reagendar|consultar|saludo|otro",
-                  "categoria": "electricista|plomero|cerrajero|pintor|otro|null",
-                  "urgencia": "alta|media|baja",
-                  "zona": "nombre del barrio o null"
-                }}
-                Mensaje: {message}"""
-            }]
-        )
-        return json.loads(response.content[0].text)
-    except Exception as e:
-        logger.error(f"Error extrayendo intención: {e}")
-        return {"accion": "otro", "categoria": None, "urgencia": "media", "zona": None}
 
 
 def handle_conversation(chat_id: int, text: str, intent: dict) -> str:
