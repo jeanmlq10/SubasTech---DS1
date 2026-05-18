@@ -59,12 +59,20 @@ export type AdminMetrics = {
   total_technicians: number;
   verified_technicians: number;
   pending_verification: number;
+  suspended_technicians: number;
   active_services: number;
   inactive_services: number;
+  total_leads: number;
+  new_leads: number;
+  contacted_leads: number;
+  accepted_leads: number;
+  closed_leads: number;
   open_disputes: number;
   in_review_disputes: number;
   resolved_disputes: number;
   average_rating: number;
+  average_reputation_score: number;
+  recent_integration_errors: number;
   total_categories: number;
   total_zones: number;
 };
@@ -110,11 +118,24 @@ export type AdminAlert = {
   message: string;
 };
 
+export type AdminAuditEvent = {
+  id: number;
+  event_type: string;
+  status: string;
+  source: string;
+  entity_type: string;
+  entity_id: string;
+  message: string;
+  created_at: string;
+};
+
 export type AdminSummary = {
   metrics: AdminMetrics;
   recent_technicians: AdminTechnicianSummary[];
   recent_services: AdminServiceSummary[];
   recent_disputes: AdminDisputeSummary[];
+  lead_status_breakdown: Record<string, number>;
+  recent_errors: AdminAuditEvent[];
   role_breakdown: Record<string, number>;
   alerts: AdminAlert[];
 };
