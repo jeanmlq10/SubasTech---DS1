@@ -165,6 +165,42 @@ class AdminCatalogPermissionTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
 
+    def test_non_admin_cannot_create_service_from_public_services_endpoint(self):
+        category = Category.objects.create(name="Plumber", slug="plumber")
+        technician_user = self.user_model.objects.create_user(username="tech-public", password="Password123", role="technician")
+        technician = TechnicianProfile.objects.create(user=technician_user)
+        self.client.force_authenticate(self.regular_user)
+
+        response = self.client.post(
+            "/api/services/",
+            {
+                "technician_id": technician.id,
+                "category_id": category.id,
+                "title": "Instalacion de llave",
+                "description": "Servicio no autorizado desde endpoint publico.",
+                "base_price": "55000.00",
+                "is_active": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_technician_cannot_update_another_technician_profile(self):
+        technician_user = self.user_model.objects.create_user(username="owner-tech", password="Password123", role="technician")
+        other_user = self.user_model.objects.create_user(username="other-tech", password="Password123", role="technician")
+        profile = TechnicianProfile.objects.create(user=technician_user, bio="Original bio")
+        TechnicianProfile.objects.create(user=other_user)
+        self.client.force_authenticate(other_user)
+
+        response = self.client.patch(
+            f"/api/technicians/{profile.id}/",
+            {"bio": "Intento de cambio"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+
 
 class DemoSeedTests(TestCase):
     def test_seed_demo_data_creates_project_demo_records_idempotently(self):

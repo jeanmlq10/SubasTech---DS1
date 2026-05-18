@@ -1,9 +1,11 @@
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
 from rest_framework import permissions, status, viewsets
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from accounts.models import User
 from accounts.permissions import IsPlatformArbiter
 from .models import Dispute
 from .serializers import ArbiterDecisionSerializer, ArbiterDisputeSerializer, DisputeSerializer
@@ -11,11 +13,22 @@ from .services import summarize_dispute
 
 
 class DisputeViewSet(viewsets.ModelViewSet):
-    queryset = Dispute.objects.select_related("client", "technician__user", "service", "arbiter").prefetch_related("evidence")
     serializer_class = DisputeSerializer
     permission_classes = [permissions.IsAuthenticated]
 
+    def get_queryset(self):
+        queryset = Dispute.objects.select_related("client", "technician__user", "service", "arbiter").prefetch_related("evidence")
+        user = self.request.user
+
+        if user.is_staff or user.is_superuser or getattr(user, "role", "") in {User.Role.ADMIN, User.Role.ARBITER}:
+            return queryset
+        if getattr(user, "role", "") == User.Role.TECHNICIAN:
+            return queryset.filter(technician__user=user)
+        return queryset.filter(client=user)
+
     def perform_create(self, serializer):
+        if self.request.user.role != User.Role.CLIENT:
+            raise PermissionDenied("Only client users can open disputes.")
         description = serializer.validated_data.get("description", "")
         serializer.save(client=self.request.user, ai_summary=summarize_dispute(description))
 
