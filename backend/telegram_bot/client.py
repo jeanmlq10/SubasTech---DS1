@@ -1,11 +1,11 @@
-import json
-import os
 from dataclasses import dataclass
-from urllib import error, request
+
+import requests
+from django.conf import settings
 
 
 @dataclass(frozen=True)
-class WhatsAppSendResult:
+class TelegramSendResult:
     sent: bool
     dry_run: bool
     payload: dict
@@ -13,39 +13,32 @@ class WhatsAppSendResult:
     error: str | None = None
 
 
-class WhatsAppCloudClient:
+class TelegramBotClient:
     def __init__(self):
-        self.access_token = os.getenv("WHATSAPP_ACCESS_TOKEN", "")
-        self.phone_number_id = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "")
-        self.api_version = os.getenv("WHATSAPP_API_VERSION", "v20.0")
-        self.dry_run = os.getenv("WHATSAPP_DRY_RUN", "True").lower() == "true"
+        self.bot_token = getattr(settings, "TELEGRAM_BOT_TOKEN", "")
+        self.dry_run = getattr(settings, "TELEGRAM_DRY_RUN", True)
 
-    def send_text(self, to: str, body: str) -> WhatsAppSendResult:
-        payload = {
-            "messaging_product": "whatsapp",
-            "recipient_type": "individual",
-            "to": to,
-            "type": "text",
-            "text": {"preview_url": False, "body": body[:4096]},
-        }
-
-        if self.dry_run or not self.access_token or not self.phone_number_id:
-            return WhatsAppSendResult(sent=False, dry_run=True, payload=payload)
-
-        url = f"https://graph.facebook.com/{self.api_version}/{self.phone_number_id}/messages"
-        http_request = request.Request(
-            url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {self.access_token}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
+    def send_message(self, payload: dict) -> TelegramSendResult:
+        if self.dry_run or not self.bot_token:
+            return TelegramSendResult(sent=False, dry_run=True, payload=payload)
 
         try:
-            with request.urlopen(http_request, timeout=10) as response:
-                response_payload = json.loads(response.read().decode("utf-8"))
-            return WhatsAppSendResult(sent=True, dry_run=False, payload=payload, response=response_payload)
-        except (error.HTTPError, error.URLError, TimeoutError) as exc:
-            return WhatsAppSendResult(sent=False, dry_run=False, payload=payload, error=str(exc))
+            response = requests.post(
+                f"https://api.telegram.org/bot{self.bot_token}/sendMessage",
+                json=payload,
+                timeout=10,
+            )
+            response.raise_for_status()
+            return TelegramSendResult(
+                sent=True,
+                dry_run=False,
+                payload=payload,
+                response=response.json(),
+            )
+        except requests.RequestException as exc:
+            return TelegramSendResult(
+                sent=False,
+                dry_run=False,
+                payload=payload,
+                error=str(exc),
+            )

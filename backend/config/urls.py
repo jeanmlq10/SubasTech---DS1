@@ -20,6 +20,7 @@ from catalog.views import (
 )
 from disputes.views import ArbiterClaimAPIView, ArbiterDecisionAPIView, ArbiterQueueAPIView, DisputeViewSet
 from leads.views import TechnicianLeadViewSet
+from llm.views import InterpretMessageAPIView
 from notifications.views import NotificationViewSet
 from recommendations.views import RecommendationAPIView
 from reputation.views import PenaltyViewSet, RatingViewSet
@@ -54,6 +55,7 @@ urlpatterns = [
     path("api/arbiter/disputes/<int:pk>/decision/", ArbiterDecisionAPIView.as_view(), name="arbiter_decision"),
     path("api/technician/onboarding/", TechnicianOnboardingAPIView.as_view(), name="technician_onboarding"),
     path("api/technicians/<int:pk>/available-slots/", TechnicianAvailableSlotsAPIView.as_view(), name="technician_available_slots"),
+    path("api/llm/interpret/", InterpretMessageAPIView.as_view(), name="llm_interpret"),
     path("api/recommendations/", RecommendationAPIView.as_view(), name="recommendations"),
     path("api/telegram/", include("telegram_bot.urls")),
     path("api/chatbot/", include("telegram_bot.urls")),

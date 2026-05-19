@@ -30,6 +30,7 @@ INSTALLED_APPS = [
     "disputes",
     "leads",
     "recommendations",
+    "llm",
     "telegram_bot",
     "notifications",
     "appointments",

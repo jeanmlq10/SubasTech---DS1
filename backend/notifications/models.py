@@ -5,6 +5,7 @@ from django.db import models
 class Notification(models.Model):
     class Channel(models.TextChoices):
         DASHBOARD = "dashboard", "Dashboard"
+        TELEGRAM = "telegram", "Telegram"
         WHATSAPP = "whatsapp", "WhatsApp"
         EMAIL = "email", "Email"
 

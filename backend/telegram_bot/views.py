@@ -2,7 +2,6 @@ import json
 import logging
 from datetime import datetime, timedelta
 
-import requests
 from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.http import JsonResponse
@@ -25,9 +24,15 @@ from audit.models import AuditEvent
 from audit.services import log_audit_event
 from catalog.models import Service, TechnicianProfile, Zone
 from leads.models import ServiceLead
+from notifications.models import Notification
+from notifications.services import (
+    build_telegram_message_payload,
+    create_notification,
+)
 from recommendations.services import RecommendationRequest, recommend_services
 
 from .ai import extract_intent
+from .client import TelegramBotClient
 from .models import ChatSession, ConversationMessage
 
 logger = logging.getLogger(__name__)
@@ -49,6 +54,12 @@ CATEGORY_KEYWORDS = {
     "plomero": ("plomero", "agua", "tuberia", "fuga"),
     "cerrajero": ("cerrajero", "llave", "cerradura", "puerta"),
     "pintor": ("pintor", "pintura", "pintar"),
+}
+CATEGORY_QUERY_ALIASES = {
+    "electricista": "electrician",
+    "plomero": "plumber",
+    "cerrajero": "locksmith",
+    "pintor": "painter",
 }
 YES_CHOICES = {"si", "sí", "s", "confirmo"}
 NO_CHOICES = {"no", "n"}
@@ -330,7 +341,7 @@ def _start_booking_flow(session: ChatSession, text: str, intent: dict) -> str:
     location = (intent.get("zona") or "").strip() or None
     urgency = _normalize_urgency(intent.get("urgencia"))
     recommendation_request = RecommendationRequest(
-        category=category,
+        category=_category_query_value(category),
         location=location,
         urgency=urgency,
         limit=3,
@@ -626,10 +637,23 @@ def _create_chat_lead(
         category=state.get("categoria") or "",
         location=state.get("zona") or "",
         urgency=state.get("urgencia") or "normal",
-        source=ServiceLead.Source.DASHBOARD,
+        source=ServiceLead.Source.TELEGRAM,
         metadata={
             "source": CHATBOT_SOURCE,
             "chat_id": session.chat_id,
+        },
+    )
+    create_notification(
+        user=technician.user,
+        template_name="lead_received",
+        context={
+            "client_name": session.user.get_full_name() or session.user.username,
+            "category": state.get("categoria") or service.title,
+        },
+        channel=Notification.Channel.DASHBOARD,
+        metadata={
+            "lead_id": lead.id,
+            "source": CHATBOT_SOURCE,
         },
     )
     log_audit_event(
@@ -725,6 +749,12 @@ def _normalize_urgency(raw_value) -> str:
     return mapping.get(str(raw_value or "").strip().lower(), "normal")
 
 
+def _category_query_value(category: str | None) -> str | None:
+    if not category:
+        return None
+    return CATEGORY_QUERY_ALIASES.get(category, category)
+
+
 def _parse_numeric_choice(text: str, total_options: int) -> int | None:
     if total_options < 1 or not text.isdigit():
         return None
@@ -755,6 +785,22 @@ def _find_zone(location: str | None) -> Zone | None:
 
 
 def send_telegram_message(chat_id: int, text: str):
-    token = settings.TELEGRAM_BOT_TOKEN
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    requests.post(url, json={"chat_id": chat_id, "text": text}, timeout=10)
+    payload = build_telegram_message_payload(
+        chat_id=chat_id,
+        text=text,
+        preview_url=False,
+    )
+    result = TelegramBotClient().send_message(payload)
+    if result.error:
+        logger.error("Error sending Telegram message: %s", result.error)
+        log_audit_event(
+            event_type=AuditEvent.EventType.INTEGRATION_ERROR,
+            channel="telegram",
+            source="telegram_bot.send_message",
+            entity_type="chat_session",
+            entity_id=str(chat_id),
+            status="error",
+            message="Telegram outbound message failed",
+            metadata={"error": result.error},
+        )
+    return result

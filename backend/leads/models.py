@@ -10,6 +10,7 @@ class ServiceLead(models.Model):
 
     class Source(models.TextChoices):
         WHATSAPP = "whatsapp", "WhatsApp"
+        TELEGRAM = "telegram", "Telegram"
         DASHBOARD = "dashboard", "Dashboard"
 
     technician = models.ForeignKey("catalog.TechnicianProfile", on_delete=models.CASCADE, related_name="leads")

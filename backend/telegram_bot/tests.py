@@ -9,6 +9,7 @@ from appointments.models import Appointment
 from audit.models import AuditEvent
 from catalog.models import Category, Service, TechnicianAvailability, TechnicianProfile, Zone
 from leads.models import ServiceLead
+from notifications.models import Notification
 
 from .ai import extract_intent
 from .models import ChatSession, ConversationMessage
@@ -114,6 +115,13 @@ class TelegramBotTests(TestCase):
         self.assertEqual(appointment.status, Appointment.Status.CONFIRMED)
         self.assertEqual(appointment.metadata["source"], "telegram_chatbot")
         self.assertEqual(appointment.lead.metadata["source"], "telegram_chatbot")
+        self.assertEqual(appointment.lead.source, ServiceLead.Source.TELEGRAM)
+        self.assertTrue(
+            Notification.objects.filter(
+                user=self.technician_user,
+                title="Nueva solicitud",
+            ).exists()
+        )
         self.assertTrue(
             AuditEvent.objects.filter(
                 event_type=AuditEvent.EventType.LEAD_CREATED,
