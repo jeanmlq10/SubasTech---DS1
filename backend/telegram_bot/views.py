@@ -44,23 +44,40 @@ DEFAULT_CANCELLATION_REASON = "Cancelled from Telegram chat"
 DEFAULT_RESCHEDULE_REASON = "Rescheduled from Telegram chat"
 
 CATEGORY_CHOICES = {
-    "1": "electricista",
-    "2": "plomero",
-    "3": "cerrajero",
-    "4": "pintor",
+    "1": "electrician",
+    "2": "plumber",
+    "3": "locksmith",
+    "4": "general-handyman",
+}
+CATEGORY_DISPLAY_NAMES = {
+    "electrician": "Electricista",
+    "plumber": "Plomero",
+    "locksmith": "Cerrajero",
+    "general-handyman": "Mantenimiento general",
 }
 CATEGORY_KEYWORDS = {
-    "electricista": ("electricista", "electricidad", "luz", "corriente"),
-    "plomero": ("plomero", "agua", "tuberia", "fuga"),
-    "cerrajero": ("cerrajero", "llave", "cerradura", "puerta"),
-    "pintor": ("pintor", "pintura", "pintar"),
+    "electrician": ("electricista", "electricidad", "luz", "corriente"),
+    "plumber": ("plomero", "agua", "tuberia", "fuga"),
+    "locksmith": ("cerrajero", "llave", "cerradura", "puerta"),
+    "general-handyman": ("mantenimiento", "reparacion", "arreglo"),
 }
-CATEGORY_QUERY_ALIASES = {
-    "electricista": "electrician",
-    "plomero": "plumber",
-    "cerrajero": "locksmith",
-    "pintor": "painter",
+
+ZONE_CHOICES = {
+    "1": "barranquilla-riomar",
+    "2": "barranquilla-alto-prado",
+    "3": "barranquilla-villa-santos",
 }
+ZONE_DISPLAY_NAMES = {
+    "barranquilla-riomar": "Riomar",
+    "barranquilla-alto-prado": "Alto Prado",
+    "barranquilla-villa-santos": "Villa Santos",
+}
+ZONE_KEYWORDS = {
+    "barranquilla-riomar": ("riomar",),
+    "barranquilla-alto-prado": ("alto prado", "prado"),
+    "barranquilla-villa-santos": ("villa santos", "villa"),
+}
+
 YES_CHOICES = {"si", "sí", "s", "confirmo"}
 NO_CHOICES = {"no", "n"}
 
@@ -280,12 +297,12 @@ def handle_conversation(session: ChatSession, text: str, intent: dict) -> str:
     lowered = cleaned_text.lower()
     accion = (intent.get("accion") or "").lower()
 
-    if cleaned_text in CATEGORY_CHOICES and step != "waiting_technician_selection":
+    # Check for numeric category selection when not in zone selection
+    if cleaned_text in CATEGORY_CHOICES and step != "waiting_zone":
         intent = {
             "accion": "agendar",
             "categoria": CATEGORY_CHOICES[cleaned_text],
             "zona": None,
-            "urgencia": "media",
         }
         accion = "agendar"
 
@@ -293,11 +310,14 @@ def handle_conversation(session: ChatSession, text: str, intent: dict) -> str:
         _reset_session(session)
         return (
             "Hola, soy el asistente de SubasTech.\n\n"
-            "Puedo ayudarte a encontrar tecnicos del hogar y agendar una cita.\n\n"
-            "¿Que servicio necesitas?\n"
-            "1. Electricista\n2. Plomero\n3. Cerrajero\n4. Pintor\n\n"
-            "Tambien puedes describirme tu problema."
+            "Puedo ayudarte a encontrar técnicos del hogar y agendar una cita.\n\n"
+            "¿Qué servicio necesitas?\n"
+            "1. Electricista\n2. Plomero\n3. Cerrajero\n4. Mantenimiento general\n\n"
+            "También puedes describirme tu problema."
         )
+
+    if step == "waiting_zone":
+        return _handle_zone_selection(session, cleaned_text, state)
 
     if step == "waiting_cancel_confirm":
         return _handle_cancel_confirmation(session, lowered, state)
@@ -334,24 +354,39 @@ def _start_booking_flow(session: ChatSession, text: str, intent: dict) -> str:
     if not category:
         _update_session(session, step="waiting_category", state_data={})
         return (
-            "¿Que tipo de tecnico necesitas?\n"
-            "Puedes responder: electricista, plomero, cerrajero o pintor."
+            "¿Qué tipo de técnico necesitas?\n"
+            "Puedes responder: electricista, plomero, cerrajero o mantenimiento."
         )
 
-    location = (intent.get("zona") or "").strip() or None
-    urgency = _normalize_urgency(intent.get("urgencia"))
+    location = _extract_zone(intent, text)
+    if not location:
+        # Ask for zone
+        _update_session(
+            session,
+            step="waiting_zone",
+            state_data={
+                "request_text": text,
+                "categoria": category,
+            },
+        )
+        return (
+            f"¿En qué zona necesitas el servicio de {CATEGORY_DISPLAY_NAMES.get(category, category)}?\n"
+            "1. Riomar\n2. Alto Prado\n3. Villa Santos"
+        )
+
+    # We have both category and zone, show technicians
     recommendation_request = RecommendationRequest(
-        category=_category_query_value(category),
+        category=category,
         location=location,
-        urgency=urgency,
+        urgency="normal",
         limit=3,
     )
     recommendations = list(recommend_services(recommendation_request))
     if not recommendations:
         _reset_session(session)
         return (
-            "Aun no encontre tecnicos disponibles para esa solicitud.\n"
-            "Intenta con otra categoria o zona."
+            "Aún no encontré técnicos disponibles para esa solicitud.\n"
+            "Intenta con otra categoría o zona."
         )
 
     _update_session(
@@ -361,14 +396,64 @@ def _start_booking_flow(session: ChatSession, text: str, intent: dict) -> str:
             "request_text": text,
             "categoria": category,
             "zona": location,
-            "urgencia": urgency,
             "recommendations": recommendations,
         },
     )
     return _build_recommendation_reply(category, location, recommendations)
 
 
-def _handle_technician_selection(session: ChatSession, text: str, state: dict) -> str:
+def _handle_zone_selection(session: ChatSession, text: str, state: dict) -> str:
+    """Handle zone selection from user (1-3 or zone name)."""
+    selected_zone = None
+    
+    # Check if numeric choice
+    if text in ZONE_CHOICES:
+        selected_zone = ZONE_CHOICES[text]
+    else:
+        # Check if zone name mentioned
+        lowered = text.lower()
+        for zone_slug, keywords in ZONE_KEYWORDS.items():
+            if any(keyword in lowered for keyword in keywords):
+                selected_zone = zone_slug
+                break
+    
+    if not selected_zone:
+        return (
+            "Por favor, responde con un número (1-3) o nombre de zona:\n"
+            "1. Riomar\n2. Alto Prado\n3. Villa Santos"
+        )
+    
+    category = state.get("categoria")
+    recommendation_request = RecommendationRequest(
+        category=category,
+        location=selected_zone,
+        urgency="normal",
+        limit=3,
+    )
+    recommendations = list(recommend_services(recommendation_request))
+    
+    if not recommendations:
+        _reset_session(session)
+        return (
+            f"No hay técnicos disponibles en {ZONE_DISPLAY_NAMES.get(selected_zone, selected_zone)} "
+            f"para {CATEGORY_DISPLAY_NAMES.get(category, category)}.\n"
+            "Intenta con otra zona o categoría."
+        )
+    
+    _update_session(
+        session,
+        step="waiting_technician_selection",
+        state_data={
+            "request_text": state.get("request_text", ""),
+            "categoria": category,
+            "zona": selected_zone,
+            "recommendations": recommendations,
+        },
+    )
+    return _build_recommendation_reply(category, selected_zone, recommendations)
+
+
+
     recommendations = state.get("recommendations") or []
     selected_index = _parse_numeric_choice(text, len(recommendations))
     if selected_index is None:
@@ -671,9 +756,10 @@ def _create_chat_lead(
 
 
 def _build_recommendation_reply(category: str, location: str | None, recommendations: list[dict]) -> str:
-    intro = f"Tecnicos disponibles para {category}"
+    intro = f"Técnicos disponibles para {CATEGORY_DISPLAY_NAMES.get(category, category)}"
     if location:
-        intro += f" en {location}"
+        zone_name = ZONE_DISPLAY_NAMES.get(location, location)
+        intro += f" en {zone_name}"
     intro += ":\n\n"
 
     lines = [intro]
@@ -684,7 +770,7 @@ def _build_recommendation_reply(category: str, location: str | None, recommendat
                 f"score {item['score']} | respuesta aprox. {item['response_time_minutes']} min"
             )
         )
-    lines.append("\nResponde con el numero del tecnico para ver horarios disponibles.")
+    lines.append("\nResponde con el número del técnico para ver horarios disponibles.")
     return "\n".join(lines)
 
 
@@ -727,32 +813,36 @@ def _format_appointment_summary(appointment: Appointment) -> str:
 def _extract_category(intent: dict, text: str) -> str | None:
     category = intent.get("categoria")
     if category:
-        return str(category).strip().lower()
+        # Normalize to slug format (e.g., "electricista" -> "electrician")
+        normalized = str(category).strip().lower()
+        for slug, keywords in CATEGORY_KEYWORDS.items():
+            if normalized in keywords or normalized == slug:
+                return slug
+        return normalized
 
     lowered = (text or "").strip().lower()
-    for normalized, keywords in CATEGORY_KEYWORDS.items():
-        if lowered == normalized or any(keyword in lowered for keyword in keywords):
-            return normalized
+    for slug, keywords in CATEGORY_KEYWORDS.items():
+        if lowered == slug or any(keyword in lowered for keyword in keywords):
+            return slug
     return None
 
 
-def _normalize_urgency(raw_value) -> str:
-    mapping = {
-        "alta": "high",
-        "high": "high",
-        "urgente": "high",
-        "media": "normal",
-        "normal": "normal",
-        "baja": "low",
-        "low": "low",
-    }
-    return mapping.get(str(raw_value or "").strip().lower(), "normal")
+def _extract_zone(intent: dict, text: str) -> str | None:
+    """Extract zone slug from intent or text."""
+    zone = intent.get("zona")
+    if zone:
+        # Check if it matches any zone slug or keyword
+        zone_lower = str(zone).strip().lower()
+        for zone_slug, keywords in ZONE_KEYWORDS.items():
+            if zone_lower in keywords or zone_lower == zone_slug:
+                return zone_slug
+        return zone_lower
 
-
-def _category_query_value(category: str | None) -> str | None:
-    if not category:
-        return None
-    return CATEGORY_QUERY_ALIASES.get(category, category)
+    lowered = (text or "").strip().lower()
+    for zone_slug, keywords in ZONE_KEYWORDS.items():
+        if any(keyword in lowered for keyword in keywords):
+            return zone_slug
+    return None
 
 
 def _parse_numeric_choice(text: str, total_options: int) -> int | None:
