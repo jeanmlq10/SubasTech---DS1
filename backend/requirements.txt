@@ -9,4 +9,4 @@ python-dotenv
 requests
 gunicorn
 python-telegram-bot==21.0
-google-generativeai
+google-genai

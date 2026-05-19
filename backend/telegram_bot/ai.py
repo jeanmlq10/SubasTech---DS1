@@ -3,7 +3,7 @@ import logging
 import re
 import unicodedata
 
-import google.generativeai as genai
+import google.genai as genai
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
@@ -24,7 +24,7 @@ LOCATION_PATTERNS = [
 ]
 
 
-genai.configure(api_key=settings.GEMINI_API_KEY)
+client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
 
 def normalize_text(value: str) -> str:
@@ -40,7 +40,7 @@ def _clean_response_text(text: str) -> str:
 
 def extract_intent(message: str) -> dict:
     prompt = f"""Extrae la intención del siguiente mensaje de un usuario que solicita servicios técnicos del hogar en Barranquilla, Colombia.
-Responde SOLO con JSON válido, sin texto adicional:
+Responde SOLO con JSON válido, sin texto adicional, sin markdown:
 {{
   "accion": "agendar|cancelar|reagendar|consultar|saludo|otro",
   "categoria": "electricista|plomero|cerrajero|pintor|otro|null",
@@ -50,36 +50,32 @@ Responde SOLO con JSON válido, sin texto adicional:
 Mensaje: {message}
 """
     try:
-        response = genai.generate_text(
-            model="gemini-1.5-flash",
-            prompt=prompt,
-            max_output_tokens=300,
-            temperature=0.2,
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
         )
-        text = getattr(response, "text", None)
-        if text is None:
-            text = getattr(response, "content", None)
-        text = _clean_response_text(text)
+        text = response.text.strip()
+        # Limpiar posibles bloques markdown
+        if text.startswith("```"):
+            text = re.sub(r"```(?:json)?", "", text).strip()
         return json.loads(text)
     except json.JSONDecodeError as e:
         logger.error(f"Error parsing Gemini response JSON: {e}")
     except Exception as e:
         logger.error(f"Error extracting intent with Gemini: {e}")
-
-    # Fallback a parsing por reglas si la respuesta no es válida
-    text = normalize_text(message)
+    # Fallback por reglas
+    text_norm = normalize_text(message)
     category = ""
     for slug, keywords in CATEGORY_KEYWORDS.items():
-        if any(keyword in text for keyword in keywords):
+        if any(keyword in text_norm for keyword in keywords):
             category = slug
             break
-
     location = ""
     for pattern in LOCATION_PATTERNS:
-        match = re.search(pattern, text)
+        match = re.search(pattern, text_norm)
         if match:
             location = match.group(1).split(".", 1)[0].split(",", 1)[0].strip()
             break
-
-    urgency = "high" if any(keyword in text for keyword in URGENCY_KEYWORDS) else "normal"
-    return {"accion": "otro", "categoria": category or None, "urgencia": urgency, "zona": location or None}
+    urgency = "alta" if any(keyword in text_norm for keyword in URGENCY_KEYWORDS) else "baja"
+    accion = "agendar" if category else "otro"
+    return {"accion": accion, "categoria": category or None, "urgencia": urgency, "zona": location or None}

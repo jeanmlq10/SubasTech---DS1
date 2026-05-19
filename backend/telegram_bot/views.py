@@ -36,6 +36,16 @@ def handle_conversation(chat_id: int, text: str, intent: dict) -> str:
     state = conversation_states.get(chat_id, {})
     accion = intent.get("accion")
 
+    category_choices = {
+        "1": "electricista",
+        "2": "plomero",
+        "3": "cerrajero",
+        "4": "pintor",
+    }
+    if text in category_choices and state.get("step") != "waiting_selection":
+        intent = {"accion": "agendar", "categoria": category_choices[text], "zona": None}
+        accion = "agendar"
+
     if accion == "saludo" or text.lower() in ["/start", "hola", "buenas"]:
         conversation_states[chat_id] = {}
         return (
