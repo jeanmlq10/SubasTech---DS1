@@ -2,6 +2,7 @@ from datetime import timedelta
 import os
 from pathlib import Path
 
+from decouple import config as env
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -29,7 +30,7 @@ INSTALLED_APPS = [
     "disputes",
     "leads",
     "recommendations",
-    "whatsapp",
+    "telegram_bot",
     "notifications",
     "appointments",
 ]
@@ -127,3 +128,7 @@ CORS_ALLOWED_ORIGINS = [
     for origin in os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000").split(",")
     if origin.strip()
 ]
+
+TELEGRAM_BOT_TOKEN = env("TELEGRAM_BOT_TOKEN", default="")
+TELEGRAM_DRY_RUN = env("TELEGRAM_DRY_RUN", default="True").lower() == "true"
+GEMINI_API_KEY = env("GEMINI_API_KEY", default="")
