@@ -55,6 +55,7 @@ urlpatterns = [
     path("api/technician/onboarding/", TechnicianOnboardingAPIView.as_view(), name="technician_onboarding"),
     path("api/recommendations/", RecommendationAPIView.as_view(), name="recommendations"),
     path("api/telegram/", include("telegram_bot.urls")),
+    path("api/chatbot/", include("telegram_bot.urls")),
     path("api/", include(router.urls)),
 ]
 
