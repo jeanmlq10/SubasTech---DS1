@@ -1,8 +1,10 @@
+from datetime import time
+
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.core.management.base import BaseCommand
 
-from catalog.models import Category, Service, TechnicianProfile, Zone
+from catalog.models import Category, Service, TechnicianAvailability, TechnicianProfile, Zone
 from disputes.models import Dispute
 from leads.models import ServiceLead
 from reputation.models import Rating
@@ -11,47 +13,177 @@ DEMO_PASSWORD = "Subastech123!"
 
 USERS = [
     {"username": "demo_admin", "role": "admin", "email": "admin@subastech.demo", "first_name": "Admin", "last_name": "SubasTech"},
-    {"username": "demo_arbiter", "role": "arbiter", "email": "arbiter@subastech.demo", "first_name": "Ana", "last_name": "Arbitro"},
     {"username": "demo_client", "role": "client", "email": "client@subastech.demo", "first_name": "Camila", "last_name": "Cliente", "phone_number": "573001112233"},
+    # Electricistas
     {"username": "tech_carlos", "role": "technician", "email": "carlos@subastech.demo", "first_name": "Carlos", "last_name": "Mendoza", "phone_number": "573002223344"},
-    {"username": "tech_laura", "role": "technician", "email": "laura@subastech.demo", "first_name": "Laura", "last_name": "Perez", "phone_number": "573003334455"},
-    {"username": "tech_miguel", "role": "technician", "email": "miguel@subastech.demo", "first_name": "Miguel", "last_name": "Rojas", "phone_number": "573004445566"},
+    {"username": "tech_ana", "role": "technician", "email": "ana@subastech.demo", "first_name": "Ana", "last_name": "Torres", "phone_number": "573002223345"},
+    {"username": "tech_roberto", "role": "technician", "email": "roberto@subastech.demo", "first_name": "Roberto", "last_name": "Silva", "phone_number": "573002223346"},
+    # Plomeros
+    {"username": "tech_maria", "role": "technician", "email": "maria@subastech.demo", "first_name": "María", "last_name": "González", "phone_number": "573003334455"},
+    {"username": "tech_pedro", "role": "technician", "email": "pedro@subastech.demo", "first_name": "Pedro", "last_name": "Ramírez", "phone_number": "573003334456"},
+    {"username": "tech_lucia", "role": "technician", "email": "lucia@subastech.demo", "first_name": "Lucía", "last_name": "Herrera", "phone_number": "573003334457"},
+    # Cerrajeros
+    {"username": "tech_jorge", "role": "technician", "email": "jorge@subastech.demo", "first_name": "Jorge", "last_name": "Castro", "phone_number": "573004445566"},
+    {"username": "tech_sofia", "role": "technician", "email": "sofia@subastech.demo", "first_name": "Sofía", "last_name": "Mendez", "phone_number": "573004445567"},
+    {"username": "tech_andres", "role": "technician", "email": "andres@subastech.demo", "first_name": "Andrés", "last_name": "Vargas", "phone_number": "573004445568"},
+    # Mantenimiento General
+    {"username": "tech_valentina", "role": "technician", "email": "valentina@subastech.demo", "first_name": "Valentina", "last_name": "Ríos", "phone_number": "573005556677"},
+    {"username": "tech_diego", "role": "technician", "email": "diego@subastech.demo", "first_name": "Diego", "last_name": "Morales", "phone_number": "573005556678"},
+    {"username": "tech_camila", "role": "technician", "email": "camila@subastech.demo", "first_name": "Camila", "last_name": "Ortiz", "phone_number": "573005556679"},
 ]
 
 TECHNICIANS = {
+    # Electricistas
     "tech_carlos": {
         "bio": "Electricista residencial con experiencia en urgencias, tableros y tomacorrientes.",
         "category": "electrician",
         "service": "Electricista urgente residencial",
-        "description": "Diagnostico y reparacion de fallas electricas, breakers, tomacorrientes y cortos.",
+        "description": "Diagnóstico y reparación de fallas eléctricas, breakers, tomacorrientes y cortos.",
         "base_price": 85000,
-        "zones": ["barranquilla-riomar", "barranquilla-alto-prado"],
+        "zones": ["barranquilla-riomar"],
         "response_time_minutes": 15,
         "service_completion_rate": 96,
         "rating": 5,
     },
-    "tech_laura": {
-        "bio": "Tecnica en electrodomesticos y aires acondicionados para hogares.",
-        "category": "appliance-repair",
-        "service": "Reparacion de lavadoras y neveras",
-        "description": "Diagnostico, mantenimiento y reparacion de electrodomesticos de uso domestico.",
+    "tech_ana": {
+        "bio": "Especialista en instalaciones eléctricas residenciales y comerciales.",
+        "category": "electrician",
+        "service": "Instalación eléctrica comercial",
+        "description": "Instalaciones, reparaciones y revisión de sistemas eléctricos.",
         "base_price": 95000,
-        "zones": ["barranquilla-villa-santos", "barranquilla-riomar"],
+        "zones": ["barranquilla-alto-prado"],
+        "response_time_minutes": 20,
+        "service_completion_rate": 94,
+        "rating": 5,
+    },
+    "tech_roberto": {
+        "bio": "Electricista con 15 años de experiencia en mantenimiento industrial.",
+        "category": "electrician",
+        "service": "Electricista industrial",
+        "description": "Mantenimiento y reparación de sistemas eléctricos de alta tensión.",
+        "base_price": 110000,
+        "zones": ["barranquilla-villa-santos"],
+        "response_time_minutes": 30,
+        "service_completion_rate": 98,
+        "rating": 5,
+    },
+    # Plomeros
+    "tech_maria": {
+        "bio": "Plomera especializada en fugas, destapes y reparaciones de tuberías.",
+        "category": "plumber",
+        "service": "Plomería y fugas residenciales",
+        "description": "Atención de fugas, destapes, baños, lavaplatos y reparaciones de tubería.",
+        "base_price": 70000,
+        "zones": ["barranquilla-riomar"],
+        "response_time_minutes": 20,
+        "service_completion_rate": 92,
+        "rating": 4,
+    },
+    "tech_pedro": {
+        "bio": "Técnico en plomería sanitaria y sistemas de agua caliente.",
+        "category": "plumber",
+        "service": "Agua caliente y calefacción",
+        "description": "Instalación y reparación de sistemas de agua caliente y calefacción.",
+        "base_price": 90000,
+        "zones": ["barranquilla-alto-prado"],
+        "response_time_minutes": 25,
+        "service_completion_rate": 89,
+        "rating": 4,
+    },
+    "tech_lucia": {
+        "bio": "Plomera experta en sistemas de drenaje y tratamiento de agua.",
+        "category": "plumber",
+        "service": "Sistemas de drenaje",
+        "description": "Diseño e instalación de sistemas de drenaje y tratamiento de aguas.",
+        "base_price": 100000,
+        "zones": ["barranquilla-villa-santos"],
         "response_time_minutes": 30,
         "service_completion_rate": 91,
         "rating": 4,
     },
-    "tech_miguel": {
-        "bio": "Plomero para fugas, banos, griferia y tuberias.",
-        "category": "plumber",
-        "service": "Plomeria y fugas residenciales",
-        "description": "Atencion de fugas, destapes, banos, lavaplatos y reparaciones de tuberia.",
-        "base_price": 70000,
-        "zones": ["barranquilla-boston", "barranquilla-ciudad-jardin"],
+    # Cerrajeros
+    "tech_jorge": {
+        "bio": "Cerrajero especialista en cerraduras de seguridad y automatización.",
+        "category": "locksmith",
+        "service": "Cerraduras de seguridad",
+        "description": "Instalación y reparación de cerraduras, llaves y sistemas de acceso.",
+        "base_price": 75000,
+        "zones": ["barranquilla-riomar"],
+        "response_time_minutes": 15,
+        "service_completion_rate": 95,
+        "rating": 5,
+    },
+    "tech_sofia": {
+        "bio": "Cerrajera con experiencia en cerraduras inteligentes y acceso biométrico.",
+        "category": "locksmith",
+        "service": "Cerraduras inteligentes",
+        "description": "Instalación de cerraduras inteligentes, biométricas y sistemas modernos.",
+        "base_price": 120000,
+        "zones": ["barranquilla-alto-prado"],
         "response_time_minutes": 25,
+        "service_completion_rate": 97,
+        "rating": 5,
+    },
+    "tech_andres": {
+        "bio": "Cerrajero urgente disponible 24/7 para emergencias de cerraduras.",
+        "category": "locksmith",
+        "service": "Cerrajería urgente 24/7",
+        "description": "Servicio de emergencia para cerraduras, puertas atascadas y llaves perdidas.",
+        "base_price": 85000,
+        "zones": ["barranquilla-villa-santos"],
+        "response_time_minutes": 10,
+        "service_completion_rate": 100,
+        "rating": 5,
+    },
+    # Mantenimiento General
+    "tech_valentina": {
+        "bio": "Técnica de mantenimiento general con experiencia en reparaciones varias.",
+        "category": "general-handyman",
+        "service": "Mantenimiento general residencial",
+        "description": "Reparaciones varias, montajes, mantenimiento preventivo y pequeños arreglos.",
+        "base_price": 60000,
+        "zones": ["barranquilla-riomar"],
+        "response_time_minutes": 30,
+        "service_completion_rate": 90,
+        "rating": 4,
+    },
+    "tech_diego": {
+        "bio": "Técnico mantenedor especializado en reparaciones de inmuebles.",
+        "category": "general-handyman",
+        "service": "Reparaciones y mantenimiento",
+        "description": "Reparaciones estructurales, pintura, carpintería y mantenimiento general.",
+        "base_price": 70000,
+        "zones": ["barranquilla-alto-prado"],
+        "response_time_minutes": 35,
         "service_completion_rate": 88,
         "rating": 4,
     },
+    "tech_camila": {
+        "bio": "Técnica de multiservicios: carpintería, pintura y reparaciones variadas.",
+        "category": "general-handyman",
+        "service": "Multiservicios del hogar",
+        "description": "Carpintería, pintura, cortinas, estanterías y reparaciones de múltiples tipos.",
+        "base_price": 75000,
+        "zones": ["barranquilla-villa-santos"],
+        "response_time_minutes": 40,
+        "service_completion_rate": 86,
+        "rating": 4,
+    },
+}
+
+AVAILABILITIES = {
+    "tech_carlos": [
+        {"weekday": 1, "start_time": time(9, 0), "end_time": time(12, 0)},
+    ],
+    "tech_pedro": [
+        {"weekday": 2, "start_time": time(10, 0), "end_time": time(13, 0)},
+    ],
+    "tech_sofia": [
+        {"weekday": 3, "start_time": time(8, 0), "end_time": time(11, 0)},
+    ],
+    "tech_camila": [
+        {"weekday": 4, "start_time": time(9, 0), "end_time": time(12, 0)},
+    ],
 }
 
 
@@ -113,6 +245,14 @@ class Command(BaseCommand):
                     "is_active": True,
                 },
             )
+            for availability in AVAILABILITIES.get(username, []):
+                TechnicianAvailability.objects.update_or_create(
+                    technician=profile,
+                    weekday=availability["weekday"],
+                    start_time=availability["start_time"],
+                    end_time=availability["end_time"],
+                    defaults={"is_active": True},
+                )
             services[username] = service
         return services
 
@@ -125,14 +265,14 @@ class Command(BaseCommand):
                 technician=service.technician,
                 service=service,
                 target_role=Rating.TargetRole.TECHNICIAN,
-                defaults={"score": score, "comment": "Servicio demo para presentacion SubasTech."},
+                defaults={"score": score, "comment": "Servicio demo para presentación SubasTech."},
             )
 
     def _seed_leads(self, users, services):
         lead_data = [
-            ("tech_carlos", "573001112233", "Necesito un electricista urgente en Riomar", "electrician", "riomar", "high"),
-            ("tech_laura", "573005556677", "Mi lavadora no centrifuga en Villa Santos", "appliance-repair", "villa santos", "normal"),
-            ("tech_miguel", "573006667788", "Tengo una fuga de agua en Boston", "plumber", "boston", "high"),
+            ("tech_carlos", "573001112233", "Necesito un electricista urgente en Riomar", "electrician", "Riomar", "high"),
+            ("tech_maria", "573005556677", "Tengo una fuga de agua en Alto Prado", "plumber", "Alto Prado", "high"),
+            ("tech_jorge", "573006667788", "Cerrajería urgente en Villa Santos", "locksmith", "Villa Santos", "high"),
         ]
         for username, phone, message, category, location, urgency in lead_data:
             service = services[username]
@@ -155,12 +295,12 @@ class Command(BaseCommand):
     def _seed_disputes(self, users, services):
         Dispute.objects.update_or_create(
             client=users["demo_client"],
-            technician=services["tech_laura"].technician,
-            service=services["tech_laura"],
-            title="Servicio incompleto en electrodomestico",
+            technician=services["tech_valentina"].technician,
+            service=services["tech_valentina"],
+            title="Servicio incompleto en mantenimiento",
             defaults={
-                "description": "La lavadora quedo con el mismo fallo despues de la visita y necesito revision del caso.",
-                "ai_summary": "Cliente reporta que la lavadora mantiene el fallo despues del servicio.",
+                "description": "El mantenimiento fue incompleto y quedó pendiente la pintura de la sala.",
+                "ai_summary": "Cliente reporta que el servicio de mantenimiento quedó incompleto.",
                 "priority": "high",
                 "status": Dispute.Status.OPEN,
                 "decision": Dispute.Decision.PENDING,
