@@ -8,6 +8,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from audit.views import AuditEventViewSet
 from accounts.views import MeAPIView, RegisterAPIView
 from adminpanel.views import AdminSummaryAPIView, AdminTechnicianActionAPIView
+from appointments.views import AppointmentViewSet
 from catalog.views import (
     CategoryViewSet,
     ServiceViewSet,
@@ -37,6 +38,7 @@ router.register("ratings", RatingViewSet)
 router.register("penalties", PenaltyViewSet)
 router.register("disputes", DisputeViewSet)
 router.register("notifications", NotificationViewSet, basename="notifications")
+router.register("appointments", AppointmentViewSet, basename="appointment")
 
 urlpatterns = [
     path("admin/", admin.site.urls),

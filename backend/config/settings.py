@@ -32,6 +32,7 @@ INSTALLED_APPS = [
     "recommendations",
     "telegram_bot",
     "notifications",
+    "appointments",
 ]
 
 MIDDLEWARE = [
