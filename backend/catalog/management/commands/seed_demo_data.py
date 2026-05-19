@@ -121,9 +121,10 @@ class Command(BaseCommand):
         for username, service in services.items():
             score = TECHNICIANS[username]["rating"]
             Rating.objects.update_or_create(
+                author=client,
                 technician=service.technician,
-                client=client,
                 service=service,
+                target_role=Rating.TargetRole.TECHNICIAN,
                 defaults={"score": score, "comment": "Servicio demo para presentacion SubasTech."},
             )
 
@@ -141,6 +142,7 @@ class Command(BaseCommand):
                 client_phone=phone,
                 message=message,
                 defaults={
+                    "client_user": users["demo_client"] if phone == users["demo_client"].phone_number else None,
                     "client_name": "Cliente demo",
                     "category": category,
                     "location": location,

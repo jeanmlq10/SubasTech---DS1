@@ -1,12 +1,12 @@
 # SubasTech
 
-SubasTech is an AI-powered, WhatsApp-first platform for home technical services.
+SubasTech is an AI-powered, Telegram-first platform for home technical services.
 
-The current MVP direction is not a real-time auction system. The client experience starts in WhatsApp, where an AI-assisted intake flow extracts category, urgency and location. Django then applies deterministic business logic to filter and rank technicians.
+The current MVP direction is not a real-time auction system. The client experience starts in Telegram/chatbot, where an AI-assisted intake flow extracts category, urgency and location. Django then applies deterministic business logic to filter and rank technicians, propose real appointment slots and create bookings.
 
 ## Product direction
 
-- Clients use WhatsApp only.
+- Clients use Telegram/chatbot.
 - Technicians use a responsive web dashboard.
 - Administrators use a responsive web dashboard.
 - Arbiters use a responsive web dashboard with human-in-the-loop moderation.
@@ -16,7 +16,7 @@ The current MVP direction is not a real-time auction system. The client experien
 
 ## Mobile-first UX
 
-SubasTech is mobile-first through a conversational architecture, not a native app requirement. The client experience is WhatsApp-first, while technicians, administrators and arbiters use responsive web dashboards.
+SubasTech is mobile-first through a conversational architecture, not a native app requirement. The client experience is Telegram-first, while technicians, administrators and arbiters use responsive web dashboards.
 
 Current mobile UX support includes:
 
@@ -38,11 +38,13 @@ backend/    Django, Django REST Framework, JWT auth, recommendation modules
 - `accounts`: users, roles and JWT-ready auth endpoints.
 - `catalog`: categories, zones, technician profiles, services, photos and availability.
 - `recommendations`: deterministic technician ranking engine.
-- `whatsapp`: webhook entry point and controlled intent extraction placeholder.
+- `telegram_bot`: webhook entry point, chatbot session flow and Telegram delivery.
+- `llm`: encapsulated message interpretation with provider + fallback rules.
 - `reputation`: ratings and penalties.
 - `disputes`: dispute records, evidence, arbiter queue and human-in-the-loop decisions.
-- `notifications`: dashboard/WhatsApp/email notification records.
-- `leads`: WhatsApp-created service requests assigned to technicians.
+- `notifications`: dashboard/Telegram/email notification records plus reusable templates.
+- `leads`: conversational service requests assigned to technicians.
+- `appointments`: real scheduling, cancellation and rescheduling.
 - `adminpanel`: administrator summary metrics for dashboard monitoring.
 
 ## Local development
@@ -113,12 +115,12 @@ cd backend
 .venv/bin/python manage.py seed_initial_data
 ```
 
-This creates the initial service categories and Barranquilla/Soledad coverage zones used by onboarding, recommendations and WhatsApp matching.
+This creates the initial service categories and Barranquilla/Soledad coverage zones used by onboarding, recommendations and conversational matching.
 
 
 ## Demo guide
 
-Visit `http://localhost:3000/demo` for an in-app presentation guide with demo users, route order and WhatsApp dry-run commands.
+Visit `http://localhost:3000/demo` for an in-app presentation guide with demo users and route order.
 
 ## Demo data
 
@@ -148,7 +150,7 @@ Suggested demo flow:
 
 1. Login as `demo_admin` and review metrics, categories, zones and technician moderation.
 2. Login as `tech_carlos` and review services/leads.
-3. Send a dry-run WhatsApp request to `/api/whatsapp/webhook/` and reply with `1` to create a lead.
+3. Use `/api/chatbot/message/` to simulate a Telegram conversation and create a booking.
 4. Login as `demo_arbiter` and review the open dispute.
 
 ## Frontend authentication
@@ -181,7 +183,13 @@ Dashboards still allow manual tokens for testing, but they now automatically reu
 - `POST /api/arbiter/disputes/<id>/claim/`
 - `POST /api/arbiter/disputes/<id>/decision/`
 - `POST /api/recommendations/`
-- `GET|POST /api/whatsapp/webhook/`
+- `GET /api/appointments/`
+- `POST /api/appointments/`
+- `GET /api/technicians/<id>/available-slots/`
+- `POST /api/chatbot/message/`
+- `GET /api/chatbot/history/<chat_id>/`
+- `GET|POST /api/telegram/webhook/`
+- `POST /api/llm/interpret/`
 
 Example recommendation request:
 
@@ -237,9 +245,9 @@ Related endpoints:
 - `POST /api/zones/` with admin token
 
 
-## WhatsApp lead flow
+## Telegram lead flow
 
-After SubasTech sends recommended technicians by WhatsApp, the client can reply with the option number, for example `1`. The backend uses the latest WhatsApp conversation state to create a `ServiceLead` assigned to the selected technician. The technician can see and update that lead from `/technician`.
+After SubasTech sends recommended technicians by Telegram/chatbot, the client can reply with the option number, choose a real slot and create both a `ServiceLead` and an `Appointment`. The technician can see and update that lead from `/technician`.
 
 Lead statuses:
 
@@ -248,39 +256,36 @@ Lead statuses:
 - accepted
 - closed
 
-## WhatsApp Cloud API flow
+## Telegram bot flow
 
 The webhook lives at:
 
 ```txt
-GET|POST /api/whatsapp/webhook/
+GET|POST /api/telegram/webhook/
 ```
 
-For local development it runs in dry-run mode by default. The backend still parses the incoming WhatsApp payload, extracts intent and builds the outbound message, but it does not call Meta until `WHATSAPP_DRY_RUN=False` and credentials are configured.
+For local development it runs in dry-run mode by default. The backend still parses the incoming Telegram payload, extracts intent, chooses technicians, proposes slots and builds the outbound message, but it does not call Telegram until `TELEGRAM_DRY_RUN=False` and credentials are configured.
 
 Required environment variables for real delivery:
 
 ```env
-WHATSAPP_VERIFY_TOKEN=subastech-dev-token
-WHATSAPP_DRY_RUN=False
-WHATSAPP_API_VERSION=v20.0
-WHATSAPP_PHONE_NUMBER_ID=your_meta_phone_number_id
-WHATSAPP_ACCESS_TOKEN=your_meta_access_token
+TELEGRAM_DRY_RUN=False
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token
 ```
 
-Example local dry-run payload:
+Example local chatbot payload:
 
 ```bash
-curl -X POST http://localhost:8000/api/whatsapp/webhook/   -H "Content-Type: application/json"   -d '{"from":"573001112233","message":"Necesito un electricista urgente en Riomar"}'
+curl -X POST http://localhost:8000/api/chatbot/message/ -H "Authorization: Bearer <token>" -H "Content-Type: application/json" -d '{"chat_id":101,"text":"Necesito un electricista urgente en Riomar"}'
 ```
 
-The response includes the extracted intent, ranked recommendations, the WhatsApp reply text and the outbound payload that would be sent to Meta.
+The response includes the extracted intent, ranked recommendations or slot options, and the chatbot reply text.
 
 ## MVP build order
 
 1. Run `seed_initial_data` to create categories and zones.
 2. Use `/technician` to complete technician onboarding and manage services with JWT auth.
-3. Configure Meta WhatsApp Cloud API credentials and expose `/api/whatsapp/webhook/` publicly.
-4. Improve intent extraction with Gemini Flash or OpenRouter.
+3. Configure Telegram bot credentials and expose `/api/telegram/webhook/` publicly.
+4. Validate end-to-end conversational booking, cancel and reschedule flows against a real Telegram bot.
 5. Add administrator and arbiter dashboard pages.
 6. Expand dispute moderation and reputation effects.

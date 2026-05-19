@@ -2,6 +2,7 @@ from datetime import timedelta
 import os
 from pathlib import Path
 
+from decouple import config as env
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -22,14 +23,17 @@ INSTALLED_APPS = [
     "rest_framework",
     "rest_framework_simplejwt",
     "accounts",
+    "audit",
     "adminpanel",
     "catalog",
     "reputation",
     "disputes",
     "leads",
     "recommendations",
-    "whatsapp",
+    "llm",
+    "telegram_bot",
     "notifications",
+    "appointments",
 ]
 
 MIDDLEWARE = [
@@ -62,7 +66,14 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
-if os.getenv("POSTGRES_DB"):
+if os.getenv("USE_SQLITE_FOR_TESTS", "False").lower() == "true":
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "test_db.sqlite3",
+        }
+    }
+elif os.getenv("POSTGRES_DB"):
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.postgresql",
@@ -118,3 +129,7 @@ CORS_ALLOWED_ORIGINS = [
     for origin in os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000").split(",")
     if origin.strip()
 ]
+
+TELEGRAM_BOT_TOKEN = env("TELEGRAM_BOT_TOKEN", default="")
+TELEGRAM_DRY_RUN = env("TELEGRAM_DRY_RUN", default="True").lower() == "true"
+GEMINI_API_KEY = env("GEMINI_API_KEY", default="")

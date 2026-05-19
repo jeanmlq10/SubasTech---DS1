@@ -5,9 +5,13 @@ from rest_framework.views import APIView
 
 from accounts.models import User
 from accounts.permissions import IsPlatformAdmin
+from audit.models import AuditEvent
+from audit.services import log_audit_event
 from catalog.models import Category, Service, TechnicianProfile, Zone
 from disputes.models import Dispute
+from leads.models import ServiceLead
 from reputation.models import Rating
+from reputation.services import calculate_technician_reputation
 
 
 class AdminSummaryAPIView(APIView):
@@ -17,25 +21,50 @@ class AdminSummaryAPIView(APIView):
         technicians = TechnicianProfile.objects.select_related("user").prefetch_related("zones")
         services = Service.objects.select_related("category", "technician__user")
         disputes = Dispute.objects.select_related("client", "technician__user", "service")
+        leads = ServiceLead.objects.select_related("technician__user", "service")
+        error_events = AuditEvent.objects.filter(
+            Q(event_type=AuditEvent.EventType.INTEGRATION_ERROR) | Q(status="error")
+        ).select_related("actor")
+        recent_errors = error_events[:5]
 
-        average_rating = Rating.objects.aggregate(value=Avg("score"))["value"] or 0
+        average_rating = Rating.objects.filter(target_role=Rating.TargetRole.TECHNICIAN).aggregate(value=Avg("score"))["value"] or 0
+        technician_snapshots = [calculate_technician_reputation(technician) for technician in technicians]
+        average_reputation_score = 0
+        if technician_snapshots:
+            average_reputation_score = round(
+                sum(snapshot["reputation_score"] for snapshot in technician_snapshots) / len(technician_snapshots),
+                2,
+            )
+
+        lead_status_breakdown = {
+            row["status"]: row["total"]
+            for row in leads.values("status").annotate(total=Count("id"))
+        }
         metrics = {
             "total_technicians": technicians.count(),
             "verified_technicians": technicians.filter(is_verified=True).count(),
             "pending_verification": technicians.filter(is_verified=False).count(),
+            "suspended_technicians": technicians.filter(user__is_active=False).count(),
             "active_services": services.filter(is_active=True).count(),
             "inactive_services": services.filter(is_active=False).count(),
+            "total_leads": leads.count(),
+            "new_leads": lead_status_breakdown.get(ServiceLead.Status.NEW, 0),
+            "contacted_leads": lead_status_breakdown.get(ServiceLead.Status.CONTACTED, 0),
+            "accepted_leads": lead_status_breakdown.get(ServiceLead.Status.ACCEPTED, 0),
+            "closed_leads": lead_status_breakdown.get(ServiceLead.Status.CLOSED, 0),
             "open_disputes": disputes.filter(status=Dispute.Status.OPEN).count(),
             "in_review_disputes": disputes.filter(status=Dispute.Status.IN_REVIEW).count(),
             "resolved_disputes": disputes.filter(status=Dispute.Status.RESOLVED).count(),
             "average_rating": round(float(average_rating), 2),
+            "average_reputation_score": average_reputation_score,
+            "recent_integration_errors": error_events.count(),
             "total_categories": Category.objects.filter(is_active=True).count(),
             "total_zones": Zone.objects.filter(is_active=True).count(),
         }
 
         recent_technicians = technicians.annotate(
             service_count=Count("services", distinct=True),
-            avg_rating=Avg("ratings__score"),
+            avg_rating=Avg("ratings__score", filter=Q(ratings__target_role=Rating.TargetRole.TECHNICIAN)),
         ).order_by("-created_at")[:5]
 
         recent_services = services.order_by("-created_at")[:5]
@@ -47,6 +76,8 @@ class AdminSummaryAPIView(APIView):
                 "recent_technicians": [self._technician_payload(technician) for technician in recent_technicians],
                 "recent_services": [self._service_payload(service) for service in recent_services],
                 "recent_disputes": [self._dispute_payload(dispute) for dispute in recent_disputes],
+                "lead_status_breakdown": lead_status_breakdown,
+                "recent_errors": [self._audit_payload(event) for event in recent_errors],
                 "role_breakdown": self._role_breakdown(),
                 "alerts": self._alerts(metrics),
             }
@@ -90,6 +121,18 @@ class AdminSummaryAPIView(APIView):
             "created_at": dispute.created_at.isoformat(),
         }
 
+    def _audit_payload(self, event: AuditEvent) -> dict:
+        return {
+            "id": event.id,
+            "event_type": event.event_type,
+            "status": event.status,
+            "source": event.source,
+            "entity_type": event.entity_type,
+            "entity_id": event.entity_id,
+            "message": event.message,
+            "created_at": event.created_at.isoformat(),
+        }
+
     def _role_breakdown(self) -> dict:
         rows = User.objects.values("role").annotate(total=Count("id"))
         return {row["role"]: row["total"] for row in rows}
@@ -110,6 +153,22 @@ class AdminSummaryAPIView(APIView):
                     "type": "critical",
                     "title": "Open disputes",
                     "message": f"{metrics['open_disputes']} disputes are waiting for moderation.",
+                }
+            )
+        if metrics["recent_integration_errors"]:
+            alerts.append(
+                {
+                    "type": "critical",
+                    "title": "Recent integration errors",
+                    "message": f"{metrics['recent_integration_errors']} operational errors need review in audit logs.",
+                }
+            )
+        if metrics["suspended_technicians"]:
+            alerts.append(
+                {
+                    "type": "warning",
+                    "title": "Suspended technicians",
+                    "message": f"{metrics['suspended_technicians']} technicians are currently suspended.",
                 }
             )
         if metrics["active_services"] == 0:
@@ -146,10 +205,24 @@ class AdminTechnicianActionAPIView(APIView):
         else:
             return Response({"detail": "Unsupported technician action."}, status=status.HTTP_400_BAD_REQUEST)
 
+        log_audit_event(
+            event_type=AuditEvent.EventType.ADMIN_ACTION,
+            actor=request.user,
+            source="adminpanel.technician_action",
+            entity_type="technician",
+            entity_id=technician.id,
+            status="success",
+            message="Administrator executed technician moderation action",
+            metadata={"action": action, "target_user_id": technician.user_id},
+        )
+
         annotated = (
             TechnicianProfile.objects.select_related("user")
             .prefetch_related("zones")
-            .annotate(service_count=Count("services", distinct=True), avg_rating=Avg("ratings__score"))
+            .annotate(
+                service_count=Count("services", distinct=True),
+                avg_rating=Avg("ratings__score", filter=Q(ratings__target_role=Rating.TargetRole.TECHNICIAN)),
+            )
             .get(pk=technician.pk)
         )
         return Response(AdminSummaryAPIView()._technician_payload(annotated))

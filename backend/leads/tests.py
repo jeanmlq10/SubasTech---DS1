@@ -2,6 +2,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
 
+from audit.models import AuditEvent
 from catalog.models import Category, Service, TechnicianProfile
 from .models import ServiceLead
 
@@ -49,3 +50,6 @@ class TechnicianLeadTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.lead.refresh_from_db()
         self.assertEqual(self.lead.status, ServiceLead.Status.CONTACTED)
+        event = AuditEvent.objects.get(event_type=AuditEvent.EventType.LEAD_STATUS_CHANGED)
+        self.assertEqual(event.entity_id, str(self.lead.id))
+        self.assertEqual(event.metadata["new_status"], ServiceLead.Status.CONTACTED)

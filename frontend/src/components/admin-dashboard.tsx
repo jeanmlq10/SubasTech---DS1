@@ -22,18 +22,28 @@ const emptySummary: AdminSummary = {
     total_technicians: 0,
     verified_technicians: 0,
     pending_verification: 0,
+    suspended_technicians: 0,
     active_services: 0,
     inactive_services: 0,
+    total_leads: 0,
+    new_leads: 0,
+    contacted_leads: 0,
+    accepted_leads: 0,
+    closed_leads: 0,
     open_disputes: 0,
     in_review_disputes: 0,
     resolved_disputes: 0,
     average_rating: 0,
+    average_reputation_score: 0,
+    recent_integration_errors: 0,
     total_categories: 0,
     total_zones: 0,
   },
   recent_technicians: [],
   recent_services: [],
   recent_disputes: [],
+  lead_status_breakdown: {},
+  recent_errors: [],
   role_breakdown: {},
   alerts: [],
 };
@@ -69,6 +79,8 @@ export function AdminDashboard() {
       { title: "Servicios activos", value: summary.metrics.active_services, detail: `${summary.metrics.inactive_services} inactivos`, icon: Wrench },
       { title: "Disputas abiertas", value: summary.metrics.open_disputes, detail: `${summary.metrics.in_review_disputes} en revision`, icon: AlertTriangle },
       { title: "Rating promedio", value: summary.metrics.average_rating, detail: `${summary.metrics.total_categories} categorias`, icon: Star },
+      { title: "Leads", value: summary.metrics.total_leads, detail: `${summary.metrics.new_leads} nuevos`, icon: RefreshCw },
+      { title: "Errores", value: summary.metrics.recent_integration_errors, detail: `${summary.metrics.suspended_technicians} tecnicos suspendidos`, icon: ShieldCheck },
     ],
     [summary],
   );
@@ -190,7 +202,7 @@ export function AdminDashboard() {
         </CardContent>
       </Card>
 
-      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {metricCards.map((card) => {
           const Icon = card.icon;
           return (
@@ -229,6 +241,67 @@ export function AdminDashboard() {
                     <Badge variant={alert.type === "critical" ? "destructive" : "secondary"}>{alert.type}</Badge>
                   </div>
                   <p className="mt-2 text-sm text-muted-foreground">{alert.message}</p>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Resumen operativo</CardTitle>
+            <CardDescription>Estado actual de leads, reputacion y suspension operativa.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 sm:grid-cols-2">
+            <div className="flex items-center justify-between rounded-2xl border p-4">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="size-4 text-emerald-600" />
+                <span>Reputacion promedio</span>
+              </div>
+              <span className="text-xl font-semibold">{summary.metrics.average_reputation_score}</span>
+            </div>
+            <div className="flex items-center justify-between rounded-2xl border p-4">
+              <div className="flex items-center gap-2">
+                <Users className="size-4 text-emerald-600" />
+                <span>Tecnicos suspendidos</span>
+              </div>
+              <span className="text-xl font-semibold">{summary.metrics.suspended_technicians}</span>
+            </div>
+            <div className="flex items-center justify-between rounded-2xl border p-4">
+              <div className="flex items-center gap-2">
+                <RefreshCw className="size-4 text-emerald-600" />
+                <span>Leads cerrados</span>
+              </div>
+              <span className="text-xl font-semibold">{summary.metrics.closed_leads}</span>
+            </div>
+            <div className="flex items-center justify-between rounded-2xl border p-4">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="size-4 text-emerald-600" />
+                <span>Errores recientes</span>
+              </div>
+              <span className="text-xl font-semibold">{summary.metrics.recent_integration_errors}</span>
+            </div>
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
+        <Card>
+          <CardHeader>
+            <CardTitle>Leads por estado</CardTitle>
+            <CardDescription>Seguimiento rapido del embudo conversacional.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 sm:grid-cols-2">
+            {Object.keys(summary.lead_status_breakdown).length === 0 ? (
+              <p className="text-sm text-muted-foreground">Carga el resumen para ver el estado de leads.</p>
+            ) : (
+              Object.entries(summary.lead_status_breakdown).map(([statusKey, total]) => (
+                <div key={statusKey} className="flex items-center justify-between rounded-2xl border p-4">
+                  <div className="flex items-center gap-2">
+                    <RefreshCw className="size-4 text-emerald-600" />
+                    <span className="capitalize">{statusKey.replaceAll("_", " ")}</span>
+                  </div>
+                  <span className="text-xl font-semibold">{total}</span>
                 </div>
               ))
             )}
@@ -450,6 +523,35 @@ export function AdminDashboard() {
           </CardContent>
         </Card>
       </section>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Errores operativos recientes</CardTitle>
+          <CardDescription>Eventos de auditoria marcados como error o integracion fallida.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <DataSeparator />
+          <div className="grid gap-3">
+            {summary.recent_errors.length === 0 ? (
+              <div className="rounded-2xl border p-4 text-sm text-muted-foreground">No hay errores recientes para mostrar.</div>
+            ) : (
+              summary.recent_errors.map((event) => (
+                <div key={event.id} className="rounded-2xl border p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="destructive">{event.status}</Badge>
+                    <Badge variant="secondary">{event.event_type}</Badge>
+                    <span className="text-sm font-medium">{event.source || "sin fuente"}</span>
+                  </div>
+                  <p className="mt-2 text-sm">{event.message}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {event.entity_type || "evento"} {event.entity_id ? `#${event.entity_id}` : ""} · {new Date(event.created_at).toLocaleString("es-CO")}
+                  </p>
+                </div>
+              ))
+            )}
+          </div>
+        </CardContent>
+      </Card>
       <MobileRoleNav />
     </div>
   );

@@ -5,8 +5,10 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
+from audit.views import AuditEventViewSet
 from accounts.views import MeAPIView, RegisterAPIView
 from adminpanel.views import AdminSummaryAPIView, AdminTechnicianActionAPIView
+from appointments.views import AppointmentViewSet, TechnicianAvailableSlotsAPIView
 from catalog.views import (
     CategoryViewSet,
     ServiceViewSet,
@@ -18,15 +20,16 @@ from catalog.views import (
 )
 from disputes.views import ArbiterClaimAPIView, ArbiterDecisionAPIView, ArbiterQueueAPIView, DisputeViewSet
 from leads.views import TechnicianLeadViewSet
+from llm.views import InterpretMessageAPIView
 from notifications.views import NotificationViewSet
 from recommendations.views import RecommendationAPIView
 from reputation.views import PenaltyViewSet, RatingViewSet
-from whatsapp.views import WhatsAppWebhookView
 from config.views import HealthAPIView
 
 router = DefaultRouter()
 router.register("categories", CategoryViewSet)
 router.register("zones", ZoneViewSet)
+router.register("audit/events", AuditEventViewSet, basename="audit-events")
 router.register("technicians", TechnicianProfileViewSet)
 router.register("services", ServiceViewSet)
 router.register("technician/services", TechnicianServiceViewSet, basename="technician-services")
@@ -36,6 +39,7 @@ router.register("ratings", RatingViewSet)
 router.register("penalties", PenaltyViewSet)
 router.register("disputes", DisputeViewSet)
 router.register("notifications", NotificationViewSet, basename="notifications")
+router.register("appointments", AppointmentViewSet, basename="appointment")
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -50,8 +54,11 @@ urlpatterns = [
     path("api/arbiter/disputes/<int:pk>/claim/", ArbiterClaimAPIView.as_view(), name="arbiter_claim"),
     path("api/arbiter/disputes/<int:pk>/decision/", ArbiterDecisionAPIView.as_view(), name="arbiter_decision"),
     path("api/technician/onboarding/", TechnicianOnboardingAPIView.as_view(), name="technician_onboarding"),
+    path("api/technicians/<int:pk>/available-slots/", TechnicianAvailableSlotsAPIView.as_view(), name="technician_available_slots"),
+    path("api/llm/interpret/", InterpretMessageAPIView.as_view(), name="llm_interpret"),
     path("api/recommendations/", RecommendationAPIView.as_view(), name="recommendations"),
-    path("api/whatsapp/webhook/", WhatsAppWebhookView.as_view(), name="whatsapp_webhook"),
+    path("api/telegram/", include("telegram_bot.urls")),
+    path("api/chatbot/", include("telegram_bot.urls")),
     path("api/", include(router.urls)),
 ]
 
