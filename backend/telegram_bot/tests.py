@@ -19,6 +19,7 @@ from .models import ChatSession, ConversationMessage
 class TelegramBotTests(TestCase):
     def setUp(self):
         self.client = APIClient()
+        self.webhook_client = APIClient()
         user_model = get_user_model()
         self.user = user_model.objects.create_user(
             username="telegram-client",
@@ -27,6 +28,8 @@ class TelegramBotTests(TestCase):
             first_name="Sara",
             last_name="Lopez",
             phone_number="573001112233",
+            email="sara@example.com",
+            address="Cra 10 # 20-30, Barranquilla",
         )
         self.client.force_authenticate(self.user)
 
@@ -129,13 +132,50 @@ class TelegramBotTests(TestCase):
             ).exists()
         )
 
+    def test_webhook_collects_client_data_and_auto_creates_booking(self):
+        first_response = self._send_webhook_message("Necesito un electricista en Riomar", chat_id=202)
+        self.assertTrue(first_response.json()["ok"])
+        self.assertIn("Tecnicos disponibles", first_response.json()["reply"])
+
+        second_response = self._send_webhook_message("1", chat_id=202)
+        self.assertIn("Horarios disponibles", second_response.json()["reply"])
+
+        third_response = self._send_webhook_message("1", chat_id=202)
+        self.assertIn("nombre completo", third_response.json()["reply"].lower())
+        session = ChatSession.objects.get(chat_id=202)
+        self.assertEqual(session.current_step, "waiting_contact_name")
+
+        self._send_webhook_message("Laura Diaz", chat_id=202)
+        session.refresh_from_db()
+        self.assertEqual(session.current_step, "waiting_contact_phone")
+
+        self._send_webhook_message("3001234567", chat_id=202)
+        session.refresh_from_db()
+        self.assertEqual(session.current_step, "waiting_contact_email")
+
+        self._send_webhook_message("laura@example.com", chat_id=202)
+        session.refresh_from_db()
+        self.assertEqual(session.current_step, "waiting_contact_address")
+
+        final_response = self._send_webhook_message("Calle 84 # 50-10, Barranquilla", chat_id=202)
+
+        self.assertIn("Cita agendada", final_response.json()["reply"])
+        session.refresh_from_db()
+        self.assertEqual(session.current_step, "initial")
+        self.assertIsNotNone(session.user)
+        self.assertEqual(session.user.telegram_chat_id, "202")
+        self.assertEqual(session.user.email, "laura@example.com")
+        self.assertEqual(session.user.address, "Calle 84 # 50-10, Barranquilla")
+        self.assertEqual(Appointment.objects.count(), 1)
+        self.assertEqual(ServiceLead.objects.count(), 1)
+
     def test_cancel_from_chat_cancels_upcoming_appointment(self):
         appointment = self._create_appointment(9, 10)
 
         start_response = self._send_message("Quiero cancelar mi cita")
         self.assertEqual(start_response.status_code, 200)
         self.assertEqual(start_response.json()["step"], "waiting_cancel_confirm")
-        self.assertIn("¿Confirmas la cancelacion?", start_response.json()["reply"])
+        self.assertIn("Confirmas la cancelacion?", start_response.json()["reply"])
 
         confirm_response = self._send_message("SI")
 
@@ -169,6 +209,13 @@ class TelegramBotTests(TestCase):
         return self.client.post(
             "/api/chatbot/message/",
             {"chat_id": chat_id, "text": text},
+            format="json",
+        )
+
+    def _send_webhook_message(self, text: str, chat_id: int = 101):
+        return self.webhook_client.post(
+            "/api/telegram/webhook/",
+            {"message": {"chat": {"id": chat_id}, "text": text}},
             format="json",
         )
 

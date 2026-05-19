@@ -11,6 +11,8 @@ class User(AbstractUser):
 
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.CLIENT)
     phone_number = models.CharField(max_length=32, blank=True)
+    address = models.CharField(max_length=255, blank=True)
+    telegram_chat_id = models.CharField(max_length=64, unique=True, blank=True, null=True)
     whatsapp_id = models.CharField(max_length=64, unique=True, blank=True, null=True)
 
     @property

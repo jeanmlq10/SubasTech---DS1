@@ -13,6 +13,7 @@ DEMO_PASSWORD = "Subastech123!"
 
 USERS = [
     {"username": "demo_admin", "role": "admin", "email": "admin@subastech.demo", "first_name": "Admin", "last_name": "SubasTech"},
+    {"username": "demo_arbiter", "role": "arbiter", "email": "arbiter@subastech.demo", "first_name": "Arbiter", "last_name": "SubasTech"},
     {"username": "demo_client", "role": "client", "email": "client@subastech.demo", "first_name": "Camila", "last_name": "Cliente", "phone_number": "573001112233"},
     # Electricistas
     {"username": "tech_carlos", "role": "technician", "email": "carlos@subastech.demo", "first_name": "Carlos", "last_name": "Mendoza", "phone_number": "573002223344"},
