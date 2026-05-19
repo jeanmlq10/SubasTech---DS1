@@ -1,127 +1,188 @@
+from datetime import datetime, time, timedelta
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
+from django.utils import timezone
 from rest_framework.test import APIClient
 
+from appointments.models import Appointment
 from audit.models import AuditEvent
-from catalog.models import Category, Service, TechnicianProfile, Zone
-from reputation.models import Rating
+from catalog.models import Category, Service, TechnicianAvailability, TechnicianProfile, Zone
 from leads.models import ServiceLead
+
 from .ai import extract_intent
-from .views import build_recommendation_reply
+from .models import ChatSession, ConversationMessage
 
 
-class WhatsAppIntentTests(TestCase):
-    def test_extracts_category_location_and_urgency(self):
-        intent = extract_intent("Necesito un electricista urgente en Riomar")
-
-        self.assertEqual(intent["category"], "electrician")
-        self.assertEqual(intent["location"], "riomar")
-        self.assertEqual(intent["urgency"], "high")
-
-
-class WhatsAppWebhookTests(TestCase):
+@override_settings(GEMINI_API_KEY="")
+class TelegramBotTests(TestCase):
     def setUp(self):
         self.client = APIClient()
         user_model = get_user_model()
-        category = Category.objects.create(name="Electrician", slug="electrician")
-        zone = Zone.objects.create(name="Riomar", city="Barranquilla")
-        tech_user = user_model.objects.create_user(
-            username="tech-whatsapp",
+        self.user = user_model.objects.create_user(
+            username="telegram-client",
+            password="Password123",
+            role="client",
+            first_name="Sara",
+            last_name="Lopez",
+            phone_number="573001112233",
+        )
+        self.client.force_authenticate(self.user)
+
+        self.category = Category.objects.create(name="Electrician", slug="electrician")
+        self.zone = Zone.objects.create(name="Riomar", city="Barranquilla")
+        self.technician_user = user_model.objects.create_user(
+            username="telegram-tech",
             password="Password123",
             role="technician",
             first_name="Carlos",
             last_name="Mendoza",
         )
-        client_user = user_model.objects.create_user(
-            username="client-whatsapp",
-            password="Password123",
-            role="client",
-            phone_number="573001112233",
-        )
-        profile = TechnicianProfile.objects.create(
-            user=tech_user,
+        self.profile = TechnicianProfile.objects.create(
+            user=self.technician_user,
             is_verified=True,
             availability_status=TechnicianProfile.AvailabilityStatus.AVAILABLE,
             response_time_minutes=15,
-            completed_services=20,
-            service_completion_rate=98,
         )
-        profile.zones.add(zone)
-        service = Service.objects.create(
-            technician=profile,
-            category=category,
+        self.profile.zones.add(self.zone)
+        self.service = Service.objects.create(
+            technician=self.profile,
+            category=self.category,
             title="Instalacion electrica",
             description="Servicio residencial",
             base_price=80000,
         )
-        Rating.objects.create(
-            author=client_user,
-            technician=profile,
-            service=service,
-            target_role=Rating.TargetRole.TECHNICIAN,
-            score=5,
+
+        self.available_date = self._next_weekday(1)
+        TechnicianAvailability.objects.create(
+            technician=self.profile,
+            weekday=self.available_date.isoweekday(),
+            start_time=time(9, 0),
+            end_time=time(12, 0),
+            is_active=True,
         )
 
-    def test_verifies_webhook_challenge(self):
-        response = self.client.get(
-            "/api/whatsapp/webhook/",
-            {"hub.verify_token": "subastech-dev-token", "hub.challenge": "12345"},
-        )
+    def test_extract_intent_fallback_detects_cancel_and_reschedule(self):
+        cancel_intent = extract_intent("Quiero cancelar mi cita")
+        reschedule_intent = extract_intent("Necesito reagendar mi cita")
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.content.decode(), "12345")
+        self.assertEqual(cancel_intent["accion"], "cancelar")
+        self.assertEqual(reschedule_intent["accion"], "reagendar")
 
-    @override_settings(ROOT_URLCONF="config.urls")
-    def test_replies_with_recommendations_in_dry_run_mode(self):
-        payload = {
-            "entry": [
-                {
-                    "changes": [
-                        {
-                            "value": {
-                                "messages": [
-                                    {
-                                        "from": "573001112233",
-                                        "text": {"body": "Necesito un electricista urgente en Riomar"},
-                                    }
-                                ]
-                            }
-                        }
-                    ]
-                }
-            ]
-        }
-
-        response = self.client.post("/api/whatsapp/webhook/", payload, format="json")
+    def test_initial_message_returns_recommendations(self):
+        response = self._send_message("Necesito un electricista urgente en Riomar")
 
         self.assertEqual(response.status_code, 200)
         body = response.json()
-        self.assertEqual(body["sender"], "573001112233")
-        self.assertEqual(body["intent"]["category"], "electrician")
-        self.assertEqual(len(body["recommendations"]), 1)
-        self.assertIn("Carlos Mendoza", body["reply_text"])
-        self.assertTrue(body["outbound"]["dry_run"])
+        self.assertEqual(body["step"], "waiting_technician_selection")
+        self.assertIn("Tecnicos disponibles", body["reply"])
+        self.assertIn("Carlos Mendoza", body["reply"])
 
+    def test_history_persists_full_conversation(self):
+        self._send_message("hola")
+        self._send_message("Necesito un electricista en Riomar")
 
-    def test_numeric_selection_creates_lead(self):
-        initial_payload = {"from": "573001112233", "message": "Necesito un electricista urgente en Riomar"}
-        initial_response = self.client.post("/api/whatsapp/webhook/", initial_payload, format="json")
-        self.assertEqual(initial_response.status_code, 200)
+        history = self.client.get("/api/chatbot/history/101/")
 
-        selection_response = self.client.post("/api/whatsapp/webhook/", {"from": "573001112233", "message": "1"}, format="json")
+        self.assertEqual(history.status_code, 200)
+        payload = history.json()
+        self.assertEqual(payload["chat_id"], 101)
+        self.assertEqual(len(payload["messages"]), 4)
+        self.assertEqual(payload["messages"][0]["direction"], ConversationMessage.Direction.INBOUND)
+        self.assertEqual(payload["messages"][1]["direction"], ConversationMessage.Direction.OUTBOUND)
+        self.assertEqual(payload["current_step"], "waiting_technician_selection")
 
+    def test_selecting_slot_creates_appointment_and_lead(self):
+        first_response = self._send_message("Necesito un electricista en Riomar")
+        self.assertEqual(first_response.json()["step"], "waiting_technician_selection")
+
+        selection_response = self._send_message("1")
         self.assertEqual(selection_response.status_code, 200)
+        self.assertEqual(selection_response.json()["step"], "waiting_slot_selection")
+        self.assertIn("Horarios disponibles", selection_response.json()["reply"])
+
+        booking_response = self._send_message("1")
+
+        self.assertEqual(booking_response.status_code, 200)
+        self.assertEqual(booking_response.json()["step"], "initial")
+        self.assertIn("Cita agendada", booking_response.json()["reply"])
+        self.assertEqual(Appointment.objects.count(), 1)
         self.assertEqual(ServiceLead.objects.count(), 1)
-        lead = ServiceLead.objects.first()
-        self.assertEqual(lead.client_phone, "573001112233")
-        self.assertEqual(lead.client_user.username, "client-whatsapp")
-        self.assertEqual(lead.status, ServiceLead.Status.NEW)
-        self.assertIn("Enviamos tu solicitud", selection_response.json()["reply_text"])
-        self.assertTrue(AuditEvent.objects.filter(event_type=AuditEvent.EventType.WEBHOOK_RECEIVED).exists())
-        self.assertTrue(AuditEvent.objects.filter(event_type=AuditEvent.EventType.LEAD_CREATED).exists())
-        self.assertTrue(AuditEvent.objects.filter(event_type=AuditEvent.EventType.MESSAGE_SENT).exists())
+        appointment = Appointment.objects.select_related("lead").get()
+        self.assertEqual(appointment.client, self.user)
+        self.assertEqual(appointment.technician, self.profile)
+        self.assertEqual(appointment.status, Appointment.Status.CONFIRMED)
+        self.assertEqual(appointment.metadata["source"], "telegram_chatbot")
+        self.assertEqual(appointment.lead.metadata["source"], "telegram_chatbot")
+        self.assertTrue(
+            AuditEvent.objects.filter(
+                event_type=AuditEvent.EventType.LEAD_CREATED,
+                entity_id=str(appointment.lead_id),
+            ).exists()
+        )
 
-    def test_builds_fallback_reply_when_no_recommendations_exist(self):
-        reply = build_recommendation_reply({"category": "plumber", "location": "Boston"}, [])
+    def test_cancel_from_chat_cancels_upcoming_appointment(self):
+        appointment = self._create_appointment(9, 10)
 
-        self.assertIn("aun no encontre tecnicos", reply)
+        start_response = self._send_message("Quiero cancelar mi cita")
+        self.assertEqual(start_response.status_code, 200)
+        self.assertEqual(start_response.json()["step"], "waiting_cancel_confirm")
+        self.assertIn("¿Confirmas la cancelacion?", start_response.json()["reply"])
+
+        confirm_response = self._send_message("SI")
+
+        self.assertEqual(confirm_response.status_code, 200)
+        self.assertEqual(confirm_response.json()["step"], "initial")
+        appointment.refresh_from_db()
+        self.assertEqual(appointment.status, Appointment.Status.CANCELLED)
+        self.assertIn("Cita cancelada", confirm_response.json()["reply"])
+
+    def test_reschedule_from_chat_uses_real_slots(self):
+        appointment = self._create_appointment(9, 10)
+
+        start_response = self._send_message("Necesito reagendar mi cita")
+        self.assertEqual(start_response.status_code, 200)
+        self.assertEqual(start_response.json()["step"], "waiting_reschedule_slot_selection")
+        self.assertIn("horarios disponibles", start_response.json()["reply"].lower())
+
+        confirm_response = self._send_message("1")
+
+        self.assertEqual(confirm_response.status_code, 200)
+        self.assertEqual(confirm_response.json()["step"], "initial")
+        appointment.refresh_from_db()
+        self.assertEqual(appointment.status, Appointment.Status.RESCHEDULED)
+        self.assertEqual(
+            timezone.localtime(appointment.scheduled_start).hour,
+            10,
+        )
+        self.assertIn("Cita reagendada", confirm_response.json()["reply"])
+
+    def _send_message(self, text: str, chat_id: int = 101):
+        return self.client.post(
+            "/api/chatbot/message/",
+            {"chat_id": chat_id, "text": text},
+            format="json",
+        )
+
+    def _create_appointment(self, start_hour: int, end_hour: int):
+        return Appointment.objects.create(
+            client=self.user,
+            technician=self.profile,
+            service=self.service,
+            scheduled_start=self._aware_datetime(self.available_date, start_hour),
+            scheduled_end=self._aware_datetime(self.available_date, end_hour),
+            status=Appointment.Status.CONFIRMED,
+        )
+
+    def _aware_datetime(self, target_date, hour: int):
+        return timezone.make_aware(
+            datetime.combine(target_date, time(hour, 0)),
+            timezone.get_current_timezone(),
+        )
+
+    def _next_weekday(self, weekday: int):
+        today = timezone.localdate()
+        offset = (weekday - today.isoweekday()) % 7
+        if offset == 0:
+            offset = 7
+        return today + timedelta(days=offset)

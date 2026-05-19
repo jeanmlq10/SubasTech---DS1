@@ -17,6 +17,9 @@ CATEGORY_KEYWORDS = {
     "general-handyman": ["arreglo", "mantenimiento", "instalar", "montar", "reparacion general"],
 }
 URGENCY_KEYWORDS = ["urgente", "ya", "emergencia", "inmediato", "rapido", "hoy", "ahora"]
+GREETING_KEYWORDS = ["hola", "buenas", "buenos dias", "/start"]
+CANCEL_KEYWORDS = ["cancelar", "cancelacion", "cancelo"]
+RESCHEDULE_KEYWORDS = ["reagendar", "reprogramar", "cambiar la cita", "mover la cita"]
 LOCATION_PATTERNS = [
     r"\ben\s+([\w\s-]+)",
     r"\bpor\s+([\w\s-]+)",
@@ -24,7 +27,15 @@ LOCATION_PATTERNS = [
 ]
 
 
-client = genai.Client(api_key=settings.GEMINI_API_KEY)
+def _get_client():
+    api_key = getattr(settings, "GEMINI_API_KEY", "")
+    if not api_key:
+        return None
+    try:
+        return genai.Client(api_key=api_key)
+    except Exception as exc:
+        logger.error(f"Error creating Gemini client: {exc}")
+        return None
 
 
 def normalize_text(value: str) -> str:
@@ -50,15 +61,17 @@ Responde SOLO con JSON válido, sin texto adicional, sin markdown:
 Mensaje: {message}
 """
     try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-        )
-        text = response.text.strip()
-        # Limpiar posibles bloques markdown
-        if text.startswith("```"):
-            text = re.sub(r"```(?:json)?", "", text).strip()
-        return json.loads(text)
+        client = _get_client()
+        if client is not None:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+            )
+            text = response.text.strip()
+            # Limpiar posibles bloques markdown
+            if text.startswith("```"):
+                text = re.sub(r"```(?:json)?", "", text).strip()
+            return json.loads(text)
     except json.JSONDecodeError as e:
         logger.error(f"Error parsing Gemini response JSON: {e}")
     except Exception as e:
@@ -77,5 +90,12 @@ Mensaje: {message}
             location = match.group(1).split(".", 1)[0].split(",", 1)[0].strip()
             break
     urgency = "alta" if any(keyword in text_norm for keyword in URGENCY_KEYWORDS) else "baja"
-    accion = "agendar" if category else "otro"
+    if any(keyword in text_norm for keyword in GREETING_KEYWORDS):
+        accion = "saludo"
+    elif any(keyword in text_norm for keyword in CANCEL_KEYWORDS):
+        accion = "cancelar"
+    elif any(keyword in text_norm for keyword in RESCHEDULE_KEYWORDS):
+        accion = "reagendar"
+    else:
+        accion = "agendar" if category else "otro"
     return {"accion": accion, "categoria": category or None, "urgencia": urgency, "zona": location or None}

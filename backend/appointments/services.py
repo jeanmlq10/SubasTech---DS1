@@ -174,6 +174,7 @@ def get_available_slots(
     service: Service | None = None,
     category: Category | None = None,
     zone: Zone | None = None,
+    exclude_appointment_id: int | None = None,
 ) -> list[dict]:
     """Return bookable appointment slots for a technician.
 
@@ -242,6 +243,7 @@ def get_available_slots(
             scheduled_start__lt=range_end,
             scheduled_end__gt=range_start,
         )
+        .exclude(pk=exclude_appointment_id)
         .order_by("scheduled_start")
         .values_list("scheduled_start", "scheduled_end")
     )
