@@ -30,10 +30,25 @@ Responde SOLO con JSON válido, sin texto adicional, sin markdown:
 Mensaje: {message}
 """
         client = genai.Client(api_key=self.api_key)
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-        )
+        # Retry with exponential backoff on transient errors (e.g., 503)
+        import time
+        max_attempts = 3
+        delay = 0.5
+        last_exc = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=prompt,
+                )
+                break
+            except Exception as exc:
+                last_exc = exc
+                logger.warning("Gemini call attempt %s failed: %s", attempt, exc)
+                if attempt == max_attempts:
+                    raise
+                time.sleep(delay)
+                delay *= 2
         text = (response.text or "").strip()
         if text.startswith("```"):
             text = re.sub(r"```(?:json)?", "", text).strip()

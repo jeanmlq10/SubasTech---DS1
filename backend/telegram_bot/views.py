@@ -453,6 +453,9 @@ def _handle_zone_selection(session: ChatSession, text: str, state: dict) -> str:
     return _build_recommendation_reply(category, selected_zone, recommendations)
 
 
+def _handle_technician_selection(session: ChatSession, text: str, state: dict) -> str:
+
+
 
     recommendations = state.get("recommendations") or []
     selected_index = _parse_numeric_choice(text, len(recommendations))
@@ -517,40 +520,6 @@ def _handle_slot_booking(session: ChatSession, text: str, state: dict) -> str:
     if technician is None or service is None:
         _reset_session(session)
         return "No pude recuperar la informacion del tecnico o del servicio. Intenta de nuevo."
-    lead = _create_chat_lead(session, state, technician, service)
-    try:
-        appointment = create_appointment(
-            client=session.user,
-            technician=technician,
-            service=service,
-            lead=lead,
-            scheduled_start=_parse_slot_datetime(selected_slot["start"]),
-            scheduled_end=_parse_slot_datetime(selected_slot["end"]),
-            status=Appointment.Status.CONFIRMED,
-            metadata={
-                "source": CHATBOT_SOURCE,
-                "chat_id": session.chat_id,
-                "category": state.get("categoria"),
-                "location": state.get("zona"),
-                "request_text": state.get("request_text"),
-            },
-            actor=session.user,
-        )
-    except DjangoValidationError:
-        logger.exception("No se pudo crear Appointment desde Telegram chatbot")
-        return (
-            "No pude reservar ese horario porque acaba de dejar de estar disponible.\n"
-            "Responde con otro numero de la lista."
-        )
-
-    _reset_session(session)
-    return (
-        "Cita agendada.\n\n"
-        f"Tecnico: {technician.user.get_full_name() or technician.user.username}\n"
-        f"Servicio: {service.title}\n"
-        f"Horario: {_format_slot_range(selected_slot)}\n\n"
-        f"Numero de cita: {appointment.id}"
-    )
 
 
 def _start_cancel_flow(session: ChatSession) -> str:
@@ -871,6 +840,11 @@ def _parse_slot_datetime(value: str):
 def _find_zone(location: str | None) -> Zone | None:
     if not location:
         return None
+    # Try matching by slug first (we store slugs like 'barranquilla-riomar')
+    zone = Zone.objects.filter(slug__iexact=location, is_active=True).first()
+    if zone:
+        return zone
+    # Fall back to name contains (user free-text)
     return Zone.objects.filter(name__icontains=location, is_active=True).first()
 
 
