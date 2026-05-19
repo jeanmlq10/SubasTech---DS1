@@ -6,14 +6,16 @@ Resumen de los endpoints MVP que ya existen en el backend de SubasTech.
 
 El foco actual del MVP es:
 
-- intake por WhatsApp
+- intake por Telegram/chatbot
 - matching de tecnicos por reglas
+- interpretacion encapsulada por `llm`
+- agenda real de citas
 - gestion de servicios y leads para tecnicos
 - moderacion administrativa
 - disputa con arbitro humano
 - reputacion, penalizaciones y auditoria operativa
 
-Los modulos `appointments`, `chatbot` y `llm` todavia no hacen parte de la API activa de este repositorio.
+Los modulos `appointments`, `telegram_bot` y `llm` ya hacen parte de la API activa de este repositorio.
 
 ## Autenticacion
 
@@ -123,33 +125,104 @@ Calcula recomendaciones de tecnicos usando:
 - tiempo de respuesta
 - reputacion/penalizaciones
 
-## WhatsApp
+## Agenda y disponibilidad
 
-### `GET|POST /api/whatsapp/webhook/`
+### `GET /api/appointments/`
 
-Webhook para verificacion y recepcion de mensajes.
+Lista citas segun el actor autenticado:
+
+- cliente: solo las suyas
+- tecnico: solo las asociadas a su perfil
+- admin: todas
+
+### `POST /api/appointments/`
+
+Crea cita real validando:
+
+- disponibilidad semanal del tecnico
+- conflictos con otras citas activas
+- relacion tecnico/servicio/lead
+
+### `POST /api/appointments/<id>/cancel/`
+
+Cancela una cita visible para el actor.
+
+### `POST /api/appointments/<id>/reschedule/`
+
+Reagenda una cita visible para el actor.
+
+### `POST /api/appointments/<id>/complete/`
+
+Marca la cita como completada.
+
+### `POST /api/appointments/<id>/no_show/`
+
+Marca la cita como `no_show`.
+
+### `GET /api/technicians/<id>/available-slots/`
+
+Consulta slots disponibles del tecnico.
+
+Admite filtros opcionales:
+
+- `start_date`
+- `days`
+- `slot_minutes`
+- `service_id`
+- `category_id`
+- `zone_id`
+
+## Chatbot y Telegram
+
+### `POST /api/chatbot/message/`
+
+Endpoint interno para probar el flujo conversacional autenticado.
+
+### `GET /api/chatbot/history/<chat_id>/`
+
+Devuelve historial persistido de mensajes para el chat vinculado.
+
+### `POST /api/chatbot/link-user/`
+
+Asocia un `chat_id` con el usuario autenticado.
+
+### `GET|POST /api/telegram/webhook/`
+
+Webhook del bot de Telegram.
 
 Notas:
 
 - en local corre por defecto en `dry-run`
-- para envio real se requiere:
-  - `WHATSAPP_DRY_RUN=False`
-  - `WHATSAPP_PHONE_NUMBER_ID`
-  - `WHATSAPP_ACCESS_TOKEN`
+- para envio real se requiere `TELEGRAM_BOT_TOKEN`
 - el backend registra auditoria de:
   - webhook recibido
   - mensaje enviado
   - lead creado
   - error de integracion
 
-Payload local de prueba:
+Flujo activo:
 
-```json
-{
-  "from": "573001112233",
-  "message": "Necesito un electricista urgente en Riomar"
-}
-```
+- seleccion de tecnico
+- seleccion de horario real
+- creacion de lead
+- creacion de cita
+- cancelacion desde chat
+- reagendamiento desde chat
+
+## LLM
+
+### `POST /api/llm/interpret/`
+
+Endpoint interno para interpretar mensajes.
+
+Respuesta minima:
+
+- `accion`
+- `categoria`
+- `urgencia`
+- `zona`
+- `confidence`
+- `provider`
 
 ## Disputas y arbitraje
 
@@ -229,6 +302,13 @@ Solo administradores.
 
 Marca lectura u otros cambios sobre notificaciones visibles para el usuario.
 
+Canales activos en modelo:
+
+- `dashboard`
+- `telegram`
+- `whatsapp`
+- `email`
+
 ## Auditoria
 
 ### `GET /api/audit/events/`
@@ -240,6 +320,7 @@ Expone eventos operativos como:
 - webhook recibido
 - mensaje enviado
 - lead creado
+- cita creada/cancelada/reagendada/completada/no_show
 - lead actualizado
 - disputa creada/claim/resuelta
 - accion admin

@@ -80,11 +80,11 @@ class AdminSummaryTests(TestCase):
         )
         AuditEvent.objects.create(
             event_type=AuditEvent.EventType.INTEGRATION_ERROR,
-            source="whatsapp.send_text",
+            source="telegram_bot.send_message",
             status="error",
             entity_type="conversation",
             entity_id="573001112233",
-            message="Meta API timeout",
+            message="Telegram API timeout",
         )
 
     def test_admin_role_can_read_summary(self):
@@ -103,7 +103,7 @@ class AdminSummaryTests(TestCase):
         self.assertEqual(body["metrics"]["closed_leads"], 1)
         self.assertEqual(body["metrics"]["recent_integration_errors"], 1)
         self.assertEqual(body["lead_status_breakdown"]["new"], 1)
-        self.assertEqual(body["recent_errors"][0]["source"], "whatsapp.send_text")
+        self.assertEqual(body["recent_errors"][0]["source"], "telegram_bot.send_message")
         self.assertEqual(body["recent_technicians"][0]["name"], "Carlos Mendoza")
         self.assertTrue(body["alerts"])
 

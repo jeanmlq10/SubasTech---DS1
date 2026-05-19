@@ -1,10 +1,10 @@
 # Alcance del Proyecto
 
-SubasTech no se enfoca en subastas inversas durante el MVP. El MVP se enfoca en agendamiento inteligente conversacional de servicios tecnicos del hogar mediante WhatsApp.
+SubasTech no se enfoca en subastas inversas durante el MVP. El MVP se enfoca en agendamiento inteligente conversacional de servicios tecnicos del hogar mediante Telegram y un flujo chatbot interno.
 
 ## Funciones Principales del MVP
 
-- Recibir solicitudes por WhatsApp.
+- Recibir solicitudes por Telegram/chatbot.
 - Interpretar la intencion del usuario.
 - Consultar tecnicos disponibles.
 - Proponer horarios.
