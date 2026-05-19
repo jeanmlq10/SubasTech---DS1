@@ -8,7 +8,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from audit.views import AuditEventViewSet
 from accounts.views import MeAPIView, RegisterAPIView
 from adminpanel.views import AdminSummaryAPIView, AdminTechnicianActionAPIView
-from appointments.views import AppointmentViewSet
+from appointments.views import AppointmentViewSet, TechnicianAvailableSlotsAPIView
 from catalog.views import (
     CategoryViewSet,
     ServiceViewSet,
@@ -53,6 +53,7 @@ urlpatterns = [
     path("api/arbiter/disputes/<int:pk>/claim/", ArbiterClaimAPIView.as_view(), name="arbiter_claim"),
     path("api/arbiter/disputes/<int:pk>/decision/", ArbiterDecisionAPIView.as_view(), name="arbiter_decision"),
     path("api/technician/onboarding/", TechnicianOnboardingAPIView.as_view(), name="technician_onboarding"),
+    path("api/technicians/<int:pk>/available-slots/", TechnicianAvailableSlotsAPIView.as_view(), name="technician_available_slots"),
     path("api/recommendations/", RecommendationAPIView.as_view(), name="recommendations"),
     path("api/telegram/", include("telegram_bot.urls")),
     path("api/chatbot/", include("telegram_bot.urls")),

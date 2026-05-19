@@ -12,6 +12,8 @@ transitions) and :class:`leads.views.TechnicianLeadViewSet` (single-word
 action calling a service helper and returning the serialized object).
 """
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -21,13 +23,17 @@ from rest_framework.exceptions import (
 )
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from accounts.models import User
 from accounts.permissions import IsPlatformAdmin
+from catalog.models import TechnicianProfile
 
 from .models import Appointment
 from .permissions import IsAppointmentParticipantOrAdmin
 from .serializers import (
+    AvailableSlotSerializer,
+    AvailableSlotsQuerySerializer,
     AppointmentCancelSerializer,
     AppointmentCompleteSerializer,
     AppointmentCreateSerializer,
@@ -39,6 +45,7 @@ from .services import (
     cancel_appointment,
     complete_appointment,
     create_appointment,
+    get_available_slots,
     mark_no_show,
     reschedule_appointment,
 )
@@ -267,4 +274,35 @@ class AppointmentViewSet(viewsets.ModelViewSet):
             AppointmentSerializer(
                 appointment, context=self.get_serializer_context()
             ).data
+        )
+
+
+class TechnicianAvailableSlotsAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk: int):
+        technician = get_object_or_404(
+            TechnicianProfile.objects.select_related("user").prefetch_related("zones"),
+            pk=pk,
+        )
+        serializer = AvailableSlotsQuerySerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        slots = _execute_service(
+            get_available_slots,
+            technician=technician,
+            **serializer.validated_data,
+        )
+        effective_start_date = serializer.validated_data.get(
+            "start_date",
+            timezone.localdate(),
+        )
+        return Response(
+            {
+                "technician": technician.id,
+                "availability_status": technician.availability_status,
+                "start_date": effective_start_date,
+                "days": serializer.validated_data["days"],
+                "slot_minutes": serializer.validated_data["slot_minutes"],
+                "slots": AvailableSlotSerializer(slots, many=True).data,
+            }
         )

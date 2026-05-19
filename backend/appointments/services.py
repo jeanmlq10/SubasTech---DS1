@@ -23,7 +23,7 @@ Conventions
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Iterable
 
 from django.core.exceptions import ValidationError
@@ -32,7 +32,13 @@ from django.utils import timezone
 
 from appointments.models import Appointment
 from audit.services import log_audit_event
-from catalog.models import Service, TechnicianAvailability, TechnicianProfile
+from catalog.models import (
+    Category,
+    Service,
+    TechnicianAvailability,
+    TechnicianProfile,
+    Zone,
+)
 from leads.models import ServiceLead
 from notifications.models import Notification
 from reputation.services import (
@@ -157,6 +163,119 @@ def compute_cancellation_timing(
     if reference < threshold:
         return Appointment.CancellationTiming.EARLY
     return Appointment.CancellationTiming.LATE
+
+
+def get_available_slots(
+    *,
+    technician: TechnicianProfile,
+    start_date: date | None = None,
+    days: int = 7,
+    slot_minutes: int = 60,
+    service: Service | None = None,
+    category: Category | None = None,
+    zone: Zone | None = None,
+) -> list[dict]:
+    """Return bookable appointment slots for a technician.
+
+    The result is generated from the technician's weekly
+    :class:`catalog.models.TechnicianAvailability` windows and subtracts any
+    overlapping appointments in :data:`Appointment.ACTIVE_STATUSES`.
+
+    Optional ``service`` / ``category`` / ``zone`` filters keep the API aligned
+    with the product flow where a customer first chooses the service context
+    and then asks for times for a specific technician.
+    """
+    if days < 1:
+        raise ValidationError({"days": "days must be greater than or equal to 1."})
+    if slot_minutes < 15:
+        raise ValidationError(
+            {"slot_minutes": "slot_minutes must be greater than or equal to 15."}
+        )
+
+    if service is not None and service.technician_id != technician.pk:
+        raise ValidationError(
+            {"service": "The service does not belong to the selected technician."}
+        )
+
+    if category is not None and not technician.services.filter(
+        category=category,
+        is_active=True,
+    ).exists():
+        return []
+
+    if zone is not None and not technician.zones.filter(
+        pk=zone.pk,
+        is_active=True,
+    ).exists():
+        return []
+
+    if technician.availability_status != TechnicianProfile.AvailabilityStatus.AVAILABLE:
+        return []
+
+    local_tz = timezone.get_current_timezone()
+    start_on = start_date or timezone.localdate()
+    date_range = [start_on + timedelta(days=offset) for offset in range(days)]
+
+    weekday_windows: dict[int, list[TechnicianAvailability]] = {}
+    for window in TechnicianAvailability.objects.filter(
+        technician=technician,
+        is_active=True,
+        weekday__in={current.isoweekday() for current in date_range},
+    ).order_by("weekday", "start_time"):
+        weekday_windows.setdefault(window.weekday, []).append(window)
+
+    if not weekday_windows:
+        return []
+
+    range_start = timezone.make_aware(
+        datetime.combine(start_on, time.min),
+        local_tz,
+    )
+    range_end = timezone.make_aware(
+        datetime.combine(start_on + timedelta(days=days), time.min),
+        local_tz,
+    )
+    existing_bookings = list(
+        Appointment.objects.filter(
+            technician=technician,
+            status__in=Appointment.ACTIVE_STATUSES,
+            scheduled_start__lt=range_end,
+            scheduled_end__gt=range_start,
+        )
+        .order_by("scheduled_start")
+        .values_list("scheduled_start", "scheduled_end")
+    )
+
+    now = timezone.now()
+    slot_delta = timedelta(minutes=slot_minutes)
+    slots: list[dict] = []
+    for current_date in date_range:
+        windows = weekday_windows.get(current_date.isoweekday(), [])
+        for window in windows:
+            candidate_start = timezone.make_aware(
+                datetime.combine(current_date, window.start_time),
+                local_tz,
+            )
+            window_end = timezone.make_aware(
+                datetime.combine(current_date, window.end_time),
+                local_tz,
+            )
+            while candidate_start + slot_delta <= window_end:
+                candidate_end = candidate_start + slot_delta
+                if candidate_start >= now and not _slot_conflicts(
+                    existing_bookings,
+                    candidate_start,
+                    candidate_end,
+                ):
+                    slots.append(
+                        {
+                            "start": candidate_start,
+                            "end": candidate_end,
+                        }
+                    )
+                candidate_start += slot_delta
+
+    return slots
 
 
 # ---------------------------------------------------------------------------
@@ -654,6 +773,17 @@ def _sync_lead_for_appointment(
         lead.metadata = metadata
         update_fields.append("metadata")
     lead.save(update_fields=update_fields)
+
+
+def _slot_conflicts(
+    existing_bookings: Iterable[tuple[datetime, datetime]],
+    candidate_start: datetime,
+    candidate_end: datetime,
+) -> bool:
+    for booked_start, booked_end in existing_bookings:
+        if booked_start < candidate_end and booked_end > candidate_start:
+            return True
+    return False
 
 
 def _log_lifecycle_event(

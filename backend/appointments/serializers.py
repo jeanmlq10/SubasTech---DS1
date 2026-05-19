@@ -21,7 +21,12 @@ The style mirrors the existing modules:
 from django.utils import timezone
 from rest_framework import serializers
 
-from catalog.models import Service, TechnicianProfile
+from catalog.models import (
+    Category,
+    Service,
+    TechnicianProfile,
+    Zone,
+)
 from leads.models import ServiceLead
 
 from .models import Appointment
@@ -221,3 +226,35 @@ class AppointmentNoShowSerializer(serializers.Serializer):
 
     def validate_reason(self, value):
         return value.strip() if isinstance(value, str) else value
+
+
+class AvailableSlotsQuerySerializer(serializers.Serializer):
+    start_date = serializers.DateField(required=False)
+    days = serializers.IntegerField(required=False, min_value=1, max_value=14, default=7)
+    slot_minutes = serializers.IntegerField(required=False, min_value=15, max_value=240, default=60)
+    service_id = serializers.PrimaryKeyRelatedField(
+        source="service",
+        queryset=Service.objects.all(),
+        required=False,
+        allow_null=True,
+        default=None,
+    )
+    category_id = serializers.PrimaryKeyRelatedField(
+        source="category",
+        queryset=Category.objects.filter(is_active=True),
+        required=False,
+        allow_null=True,
+        default=None,
+    )
+    zone_id = serializers.PrimaryKeyRelatedField(
+        source="zone",
+        queryset=Zone.objects.filter(is_active=True),
+        required=False,
+        allow_null=True,
+        default=None,
+    )
+
+
+class AvailableSlotSerializer(serializers.Serializer):
+    start = serializers.DateTimeField()
+    end = serializers.DateTimeField()
