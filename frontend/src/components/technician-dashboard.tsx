@@ -272,6 +272,44 @@ export function TechnicianDashboard() {
     }
   }
 
+  async function notifyOnTheWay(appointmentId: number) {
+    if (!token) return;
+    setStatus("loading");
+    try {
+      const response = await fetch(`${API_URL}/appointments/${appointmentId}/on_the_way/`, {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({}),
+      });
+      if (!response.ok) throw new Error("Request failed");
+      await loadWorkspace(token);
+      setStatus("success");
+      setMessage("Cliente notificado: en camino.");
+    } catch {
+      setStatus("error");
+      setMessage("No se pudo enviar la notificacion.");
+    }
+  }
+
+  async function notifyArrived(appointmentId: number) {
+    if (!token) return;
+    setStatus("loading");
+    try {
+      const response = await fetch(`${API_URL}/appointments/${appointmentId}/arrived/`, {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({}),
+      });
+      if (!response.ok) throw new Error("Request failed");
+      await loadWorkspace(token);
+      setStatus("success");
+      setMessage("Cliente notificado: has llegado.");
+    } catch {
+      setStatus("error");
+      setMessage("No se pudo enviar la notificacion.");
+    }
+  }
+
   async function completeAppointment(appointmentId: number) {
     if (!token) {
       setMessage("Inicia sesion antes de completar citas.");
@@ -668,7 +706,32 @@ export function TechnicianDashboard() {
                         <p className="mt-2 text-sm leading-6 text-purple-100">{appointment?.request_text || lead.message}</p>
                       </div>
 
-                      <div className="mt-4 grid gap-2 sm:grid-cols-4">
+                      {appointment && ["pending", "confirmed", "rescheduled"].includes(appointment.status) ? (
+                        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                          {appointment.technician_status !== "on_the_way" && appointment.technician_status !== "arrived" ? (
+                            <Button
+                              size="sm"
+                              className="bg-gradient-to-r from-blue-500 to-indigo-600 font-semibold text-white hover:from-blue-600 hover:to-indigo-700"
+                              onClick={() => void notifyOnTheWay(appointment.id)}
+                              disabled={isLoading}
+                            >
+                              En camino
+                            </Button>
+                          ) : null}
+                          {appointment.technician_status === "on_the_way" ? (
+                            <Button
+                              size="sm"
+                              className="bg-gradient-to-r from-violet-500 to-purple-600 font-semibold text-white hover:from-violet-600 hover:to-purple-700"
+                              onClick={() => void notifyArrived(appointment.id)}
+                              disabled={isLoading}
+                            >
+                              He llegado
+                            </Button>
+                          ) : null}
+                        </div>
+                      ) : null}
+
+                      <div className="mt-2 grid gap-2 sm:grid-cols-4">
                         <Button
                           size="sm"
                           variant="ghost"

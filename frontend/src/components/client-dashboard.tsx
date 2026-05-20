@@ -86,6 +86,20 @@ export function ClientDashboard() {
     };
   }, [router]);
 
+  useEffect(() => {
+    if (isBooting || appointments.length === 0) return;
+    const params = new URLSearchParams(window.location.search);
+    const rateId = params.get("rate");
+    if (!rateId) return;
+    const appointment = appointments.find(
+      (a) => a.id === parseInt(rateId, 10) && a.status === "completed",
+    );
+    if (appointment) {
+      void rateAppointment(appointment);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isBooting, appointments]);
+
   async function loadClientData(accessToken: string) {
     try {
       const [categoryResponse, zoneResponse, auctionResponse, appointmentResponse, disputeResponse, ratingResponse] = await Promise.all([
@@ -162,6 +176,46 @@ export function ClientDashboard() {
       setMessage("Oferta adjudicada. El tecnico recibira el lead.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "No se pudo adjudicar la oferta.");
+    }
+  }
+
+  async function cancelAuction(auctionId: number) {
+    if (!token) {
+      setMessage("Inicia sesion antes de cancelar.");
+      return;
+    }
+    if (!window.confirm("¿Cancelar esta subasta? Se rechazaran todas las ofertas pendientes.")) return;
+    try {
+      const response = await fetch(`${API_URL}/auctions/${auctionId}/cancel/`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!response.ok) throw new Error("No se pudo cancelar la subasta.");
+      await loadClientData(token);
+      setMessage("Subasta cancelada.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo cancelar la subasta.");
+    }
+  }
+
+  async function cancelAppointment(appointmentId: number) {
+    if (!token) {
+      setMessage("Inicia sesion antes de cancelar.");
+      return;
+    }
+    const reason = window.prompt("Motivo de cancelacion (opcional):", "") ?? "";
+    try {
+      const response = await fetch(`${API_URL}/appointments/${appointmentId}/cancel/`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ cancellation_reason: reason }),
+      });
+      if (!response.ok) throw new Error("No se pudo cancelar la cita.");
+      await loadClientData(token);
+      setMessage("Cita cancelada.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo cancelar la cita.");
     }
   }
 
@@ -492,6 +546,18 @@ export function ClientDashboard() {
                           ))
                         )}
                       </div>
+                      {auction.status === "open" ? (
+                        <div className="mt-3">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="border border-rose-500/30 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200"
+                            onClick={() => void cancelAuction(auction.id)}
+                          >
+                            Cancelar subasta
+                          </Button>
+                        </div>
+                      ) : null}
                     </div>
                   ))
                 )}
@@ -557,6 +623,15 @@ export function ClientDashboard() {
                           onClick={() => void rateAppointment(appointment)}
                         >
                           {alreadyRated ? "Calificado" : "Calificar"}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="border border-rose-500/30 text-rose-300 hover:bg-rose-500/10 hover:text-rose-200"
+                          disabled={!["pending", "confirmed", "rescheduled"].includes(appointment.status)}
+                          onClick={() => void cancelAppointment(appointment.id)}
+                        >
+                          Cancelar
                         </Button>
                       </div>
                           </>

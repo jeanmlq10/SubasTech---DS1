@@ -227,6 +227,7 @@ export type TechnicianLead = {
     scheduled_start: string;
     scheduled_end: string;
     status: "pending" | "confirmed" | "cancelled" | "rescheduled" | "completed" | "no_show";
+    technician_status: "on_the_way" | "arrived" | "";
     service_title: string;
     client_username: string;
     client_address: string;

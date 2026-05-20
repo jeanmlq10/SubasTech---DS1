@@ -344,6 +344,9 @@ def handle_conversation(session: ChatSession, text: str, intent: dict) -> str:
         _reset_session(session)
         return _build_welcome_message()
 
+    if accion == "cancelar" and step not in {"waiting_cancel_confirm", "waiting_cancel_target"}:
+        return _start_cancel_flow(session)
+
     if step == "waiting_zone":
         return _handle_zone_selection(session, cleaned_text, state)
     if step == "waiting_technician_selection":
@@ -359,13 +362,13 @@ def handle_conversation(session: ChatSession, text: str, intent: dict) -> str:
         "waiting_contact_address",
     }:
         return _handle_contact_collection(session, cleaned_text, state, step)
+    if step == "waiting_cancel_target":
+        return _handle_cancel_target(session, cleaned_text, state)
     if step == "waiting_cancel_confirm":
         return _handle_cancel_confirmation(session, lowered, state)
     if step == "waiting_reschedule_slot_selection":
         return _handle_reschedule_slot_selection(session, cleaned_text, state)
 
-    if accion == "cancelar":
-        return _start_cancel_flow(session)
     if accion == "reagendar":
         return _start_reschedule_flow(session)
     if accion == "agendar" or step == "waiting_category":
@@ -376,6 +379,7 @@ def handle_conversation(session: ChatSession, text: str, intent: dict) -> str:
         "Puedes decirme cosas como:\n"
         "- Necesito un electricista en Riomar\n"
         "- Quiero cancelar mi cita\n"
+        "- Cancelar mi subasta\n"
         "- Reagendar mi cita"
     )
 
@@ -704,28 +708,107 @@ def _format_local_time(value: datetime) -> str:
     return timezone.localtime(value).strftime("%H:%M")
 
 
+def _get_open_auction_for_session(session: ChatSession) -> "Auction | None":
+    return (
+        Auction.objects.filter(
+            source=Auction.Source.TELEGRAM,
+            status=Auction.Status.OPEN,
+            metadata__chat_id=session.chat_id,
+        )
+        .order_by("-created_at")
+        .first()
+    )
+
+
 def _start_cancel_flow(session: ChatSession) -> str:
     appointment = _get_upcoming_client_appointment(session)
-    if appointment is None:
-        _reset_session(session)
-        return "No encontre una cita activa para cancelar."
+    auction = _get_open_auction_for_session(session)
 
-    _update_session(session, step="waiting_cancel_confirm", state_data={"appointment_id": appointment.id})
-    return f"Encontre esta cita activa:\n{_format_appointment_summary(appointment)}\n\nConfirmas la cancelacion? Responde SI o NO."
+    if appointment and auction:
+        _update_session(
+            session,
+            step="waiting_cancel_target",
+            state_data={"appointment_id": appointment.id, "auction_id": auction.id},
+        )
+        return (
+            "Tienes dos cosas activas. Que quieres cancelar?\n\n"
+            f"1. Cita: {_format_appointment_summary(appointment)}\n"
+            f"2. Subasta #{auction.id}: {auction.title}\n\n"
+            "Responde 1 para la cita o 2 para la subasta."
+        )
+    if appointment:
+        _update_session(
+            session,
+            step="waiting_cancel_confirm",
+            state_data={"appointment_id": appointment.id, "cancel_target": "appointment"},
+        )
+        return f"Encontre esta cita activa:\n{_format_appointment_summary(appointment)}\n\nConfirmas la cancelacion? Responde SI o NO."
+    if auction:
+        _update_session(
+            session,
+            step="waiting_cancel_confirm",
+            state_data={"auction_id": auction.id, "cancel_target": "auction"},
+        )
+        return f"Encontre esta subasta abierta:\nSubasta #{auction.id}: {auction.title}\n\nConfirmas la cancelacion? Responde SI o NO."
+    if session.current_step != "initial":
+        _reset_session(session)
+        return "Proceso cancelado."
+    return "No tienes citas ni subastas activas para cancelar."
+
+
+def _handle_cancel_target(session: ChatSession, text: str, state: dict) -> str:
+    if text.strip() == "1":
+        appointment_id = state.get("appointment_id")
+        appointment = _get_owned_appointment(session, appointment_id)
+        if appointment is None:
+            _reset_session(session)
+            return "No encontre esa cita activa."
+        _update_session(
+            session,
+            step="waiting_cancel_confirm",
+            state_data={"appointment_id": appointment_id, "cancel_target": "appointment"},
+        )
+        return f"Confirmas la cancelacion de esta cita?\n{_format_appointment_summary(appointment)}\n\nResponde SI o NO."
+    if text.strip() == "2":
+        auction_id = state.get("auction_id")
+        auction = Auction.objects.filter(pk=auction_id, status=Auction.Status.OPEN).first()
+        if auction is None:
+            _reset_session(session)
+            return "No encontre esa subasta abierta."
+        _update_session(
+            session,
+            step="waiting_cancel_confirm",
+            state_data={"auction_id": auction_id, "cancel_target": "auction"},
+        )
+        return f"Confirmas la cancelacion de la subasta #{auction.id}: {auction.title}?\n\nResponde SI o NO."
+    return "Responde 1 para cancelar la cita o 2 para cancelar la subasta."
 
 
 def _handle_cancel_confirmation(session: ChatSession, lowered_text: str, state: dict) -> str:
     if lowered_text in NO_CHOICES:
         _reset_session(session)
-        return "Cancelacion descartada. Tu cita sigue activa."
+        return "Cancelacion descartada."
     if lowered_text not in YES_CHOICES:
-        return "Responde SI para cancelar la cita o NO para conservarla."
+        return "Responde SI para confirmar la cancelacion o NO para descartarla."
+
+    cancel_target = state.get("cancel_target", "appointment")
+
+    if cancel_target == "auction":
+        auction = Auction.objects.filter(pk=state.get("auction_id"), status=Auction.Status.OPEN).first()
+        if auction is None:
+            _reset_session(session)
+            return "Ya no encontre esa subasta abierta para cancelar."
+        with transaction.atomic():
+            Bid.objects.filter(auction=auction, status=Bid.Status.PENDING).update(status=Bid.Status.REJECTED)
+            auction.status = Auction.Status.CANCELLED
+            auction.save(update_fields=["status", "updated_at"])
+        _reset_session(session)
+        return f"Subasta #{auction.id} cancelada. Las ofertas pendientes fueron rechazadas."
 
     appointment = _get_owned_appointment(session, state.get("appointment_id"))
     if appointment is None:
         _reset_session(session)
         return "Ya no encontre esa cita activa para cancelar."
-
     cancel_appointment(appointment, actor=session.user, reason=DEFAULT_CANCELLATION_REASON)
     _reset_session(session)
     return f"Cita cancelada correctamente.\n\n{_format_appointment_summary(appointment)}"
