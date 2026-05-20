@@ -3,8 +3,8 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, ShieldCheck, Star, Users, Wrench } from "lucide-react";
 
-import { clearStoredAuth, getStoredAuth } from "@/lib/auth";
-import { AdminSummary, API_URL, Category, Zone } from "@/lib/api";
+import { clearStoredAuth, restoreSession } from "@/lib/auth";
+import { AdminSummary, API_URL, Category, TechnicianDocument, Zone } from "@/lib/api";
 import { MobileRoleNav } from "@/components/mobile-role-nav";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,18 +22,29 @@ const emptySummary: AdminSummary = {
     total_technicians: 0,
     verified_technicians: 0,
     pending_verification: 0,
+    pending_technician_documents: 0,
+    suspended_technicians: 0,
     active_services: 0,
     inactive_services: 0,
+    total_leads: 0,
+    new_leads: 0,
+    contacted_leads: 0,
+    accepted_leads: 0,
+    closed_leads: 0,
     open_disputes: 0,
     in_review_disputes: 0,
     resolved_disputes: 0,
     average_rating: 0,
+    average_reputation_score: 0,
+    recent_integration_errors: 0,
     total_categories: 0,
     total_zones: 0,
   },
   recent_technicians: [],
   recent_services: [],
   recent_disputes: [],
+  lead_status_breakdown: {},
+  recent_errors: [],
   role_breakdown: {},
   alerts: [],
 };
@@ -43,18 +54,27 @@ export function AdminDashboard() {
   const [summary, setSummary] = useState<AdminSummary>(emptySummary);
   const [categories, setCategories] = useState<Category[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
+  const [documents, setDocuments] = useState<TechnicianDocument[]>([]);
   const [categoryForm, setCategoryForm] = useState({ name: "", description: "" });
   const [zoneForm, setZoneForm] = useState({ name: "", city: "Barranquilla" });
   const [status, setStatus] = useState<ApiState>("idle");
   const [message, setMessage] = useState("Login in /login or use an administrator JWT token to load platform metrics.");
 
   useEffect(() => {
-    const session = getStoredAuth();
-    if (session) {
-      setToken(session.accessToken);
-      setMessage(`Sesion activa como ${session.user.username} (${session.user.role}). Puedes sincronizar el panel.`);
-    }
+    let mounted = true;
+
+    void (async () => {
+      const session = await restoreSession();
+      if (mounted && session) {
+        setToken(session.accessToken);
+        setMessage(`Sesion activa como ${session.user.username} (${session.user.role}). Puedes sincronizar el panel.`);
+      }
+    })();
     void loadCatalog();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   function logout() {
@@ -66,9 +86,12 @@ export function AdminDashboard() {
   const metricCards = useMemo(
     () => [
       { title: "Tecnicos", value: summary.metrics.total_technicians, detail: `${summary.metrics.verified_technicians} verificados`, icon: Users },
+      { title: "Documentos", value: summary.metrics.pending_technician_documents, detail: "pendientes de revision", icon: ShieldCheck },
       { title: "Servicios activos", value: summary.metrics.active_services, detail: `${summary.metrics.inactive_services} inactivos`, icon: Wrench },
       { title: "Disputas abiertas", value: summary.metrics.open_disputes, detail: `${summary.metrics.in_review_disputes} en revision`, icon: AlertTriangle },
       { title: "Rating promedio", value: summary.metrics.average_rating, detail: `${summary.metrics.total_categories} categorias`, icon: Star },
+      { title: "Leads", value: summary.metrics.total_leads, detail: `${summary.metrics.new_leads} nuevos`, icon: RefreshCw },
+      { title: "Errores", value: summary.metrics.recent_integration_errors, detail: `${summary.metrics.suspended_technicians} tecnicos suspendidos`, icon: ShieldCheck },
     ],
     [summary],
   );
@@ -91,15 +114,50 @@ export function AdminDashboard() {
 
     setStatus("loading");
     try {
-      const response = await fetch(`${API_URL}/admin/summary/`, { headers: { Authorization: `Bearer ${token}` } });
+      const [response, documentResponse] = await Promise.all([
+        fetch(`${API_URL}/admin/summary/`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${API_URL}/technician/documents/`, { headers: { Authorization: `Bearer ${token}` } }),
+      ]);
       if (!response.ok) throw new Error("Admin summary request failed");
+      if (!documentResponse.ok) throw new Error("Technician documents request failed");
       setSummary((await response.json()) as AdminSummary);
+      setDocuments((await documentResponse.json()) as TechnicianDocument[]);
       await loadCatalog();
       setStatus("success");
       setMessage("Admin summary loaded.");
     } catch {
       setStatus("error");
       setMessage("Could not load admin summary. Check that the token belongs to an admin user.");
+    }
+  }
+
+  async function reviewDocument(documentId: number, reviewStatus: "approved" | "rejected") {
+    if (!token) {
+      setMessage("Add an administrator JWT token before reviewing documents.");
+      return;
+    }
+
+    const adminNotes =
+      reviewStatus === "rejected" && typeof window !== "undefined"
+        ? window.prompt("Observaciones para el tecnico", "El documento no cumple los criterios de verificacion.") ?? ""
+        : "";
+
+    setStatus("loading");
+    try {
+      const response = await fetch(`${API_URL}/technician/documents/${documentId}/`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ review_status: reviewStatus, admin_notes: adminNotes }),
+      });
+      if (!response.ok) throw new Error("Document review failed");
+      const updatedDocument = (await response.json()) as TechnicianDocument;
+      setDocuments((current) => current.map((document) => (document.id === updatedDocument.id ? updatedDocument : document)));
+      await loadSummary();
+      setStatus("success");
+      setMessage(reviewStatus === "approved" ? "Documento aprobado." : "Documento rechazado.");
+    } catch {
+      setStatus("error");
+      setMessage("Could not review technician document.");
     }
   }
 
@@ -190,7 +248,7 @@ export function AdminDashboard() {
         </CardContent>
       </Card>
 
-      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {metricCards.map((card) => {
           const Icon = card.icon;
           return (
@@ -229,6 +287,67 @@ export function AdminDashboard() {
                     <Badge variant={alert.type === "critical" ? "destructive" : "secondary"}>{alert.type}</Badge>
                   </div>
                   <p className="mt-2 text-sm text-muted-foreground">{alert.message}</p>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Resumen operativo</CardTitle>
+            <CardDescription>Estado actual de leads, reputacion y suspension operativa.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 sm:grid-cols-2">
+            <div className="flex items-center justify-between rounded-2xl border p-4">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="size-4 text-emerald-600" />
+                <span>Reputacion promedio</span>
+              </div>
+              <span className="text-xl font-semibold">{summary.metrics.average_reputation_score}</span>
+            </div>
+            <div className="flex items-center justify-between rounded-2xl border p-4">
+              <div className="flex items-center gap-2">
+                <Users className="size-4 text-emerald-600" />
+                <span>Tecnicos suspendidos</span>
+              </div>
+              <span className="text-xl font-semibold">{summary.metrics.suspended_technicians}</span>
+            </div>
+            <div className="flex items-center justify-between rounded-2xl border p-4">
+              <div className="flex items-center gap-2">
+                <RefreshCw className="size-4 text-emerald-600" />
+                <span>Leads cerrados</span>
+              </div>
+              <span className="text-xl font-semibold">{summary.metrics.closed_leads}</span>
+            </div>
+            <div className="flex items-center justify-between rounded-2xl border p-4">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="size-4 text-emerald-600" />
+                <span>Errores recientes</span>
+              </div>
+              <span className="text-xl font-semibold">{summary.metrics.recent_integration_errors}</span>
+            </div>
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
+        <Card>
+          <CardHeader>
+            <CardTitle>Leads por estado</CardTitle>
+            <CardDescription>Seguimiento rapido del embudo conversacional.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3 sm:grid-cols-2">
+            {Object.keys(summary.lead_status_breakdown).length === 0 ? (
+              <p className="text-sm text-muted-foreground">Carga el resumen para ver el estado de leads.</p>
+            ) : (
+              Object.entries(summary.lead_status_breakdown).map(([statusKey, total]) => (
+                <div key={statusKey} className="flex items-center justify-between rounded-2xl border p-4">
+                  <div className="flex items-center gap-2">
+                    <RefreshCw className="size-4 text-emerald-600" />
+                    <span className="capitalize">{statusKey.replaceAll("_", " ")}</span>
+                  </div>
+                  <span className="text-xl font-semibold">{total}</span>
                 </div>
               ))
             )}
@@ -280,6 +399,7 @@ export function AdminDashboard() {
                   </div>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <Badge variant={technician.is_verified ? "default" : "secondary"}>{technician.is_verified ? "Verificado" : "Pendiente"}</Badge>
+                    <Badge variant="secondary">{technician.document_counts.pending} docs pendientes</Badge>
                     <Badge variant="secondary">{technician.service_count} servicios</Badge>
                     <Badge variant="secondary">{technician.average_rating} rating</Badge>
                   </div>
@@ -317,6 +437,7 @@ export function AdminDashboard() {
                         <div className="flex flex-wrap gap-2">
                           <Badge variant={technician.is_verified ? "default" : "secondary"}>{technician.is_verified ? "Verificado" : "Pendiente"}</Badge>
                           <Badge variant={technician.user_is_active ? "secondary" : "destructive"}>{technician.user_is_active ? "Activo" : "Suspendido"}</Badge>
+                          <Badge variant="secondary">{technician.document_counts.pending} docs pendientes</Badge>
                         </div>
                         <p className="mt-1 text-xs text-muted-foreground">{technician.availability_status} - {technician.average_rating} rating</p>
                       </TableCell>
@@ -337,10 +458,52 @@ export function AdminDashboard() {
         </CardContent>
       </Card>
 
+      <Card>
+        <CardHeader>
+          <CardTitle>Documentos de tecnicos</CardTitle>
+          <CardDescription>Aprueba o rechaza soportes subidos durante el onboarding.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <DataSeparator />
+          {documents.length === 0 ? (
+            <div className="rounded-2xl border p-4 text-sm text-muted-foreground">No hay documentos para revisar.</div>
+          ) : (
+            <div className="grid gap-3">
+              {documents.map((document) => (
+                <div key={document.id} className="rounded-2xl border p-4 shadow-sm">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-medium">{document.technician_name}</p>
+                        <Badge variant={document.review_status === "rejected" ? "destructive" : "secondary"}>{document.review_status}</Badge>
+                        <Badge variant="outline">{document.document_type}</Badge>
+                      </div>
+                      <p className="mt-2 text-sm text-muted-foreground">{document.notes || "Sin notas del tecnico."}</p>
+                      {document.admin_notes ? <p className="mt-1 text-sm text-muted-foreground">Revision admin: {document.admin_notes}</p> : null}
+                      <a className="mt-2 inline-block text-sm font-medium text-primary underline-offset-4 hover:underline" href={document.file} target="_blank" rel="noreferrer">
+                        Ver documento
+                      </a>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="outline" disabled={isLoading || document.review_status === "approved"} onClick={() => void reviewDocument(document.id, "approved")}>
+                        Aprobar
+                      </Button>
+                      <Button size="sm" variant="destructive" disabled={isLoading || document.review_status === "rejected"} onClick={() => void reviewDocument(document.id, "rejected")}>
+                        Rechazar
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <section className="grid gap-6 xl:grid-cols-2">
         <CatalogCard
           title="Categorias"
-          description="Gestiona tipos de servicio usados por WhatsApp y recomendaciones."
+          description="Gestiona tipos de servicio usados por Telegram y recomendaciones."
           items={categories.map((category) => `${category.name}${category.is_active ? "" : " (inactiva)"}`)}
           onSubmit={createCategory}
         >
@@ -450,6 +613,35 @@ export function AdminDashboard() {
           </CardContent>
         </Card>
       </section>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Errores operativos recientes</CardTitle>
+          <CardDescription>Eventos de auditoria marcados como error o integracion fallida.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <DataSeparator />
+          <div className="grid gap-3">
+            {summary.recent_errors.length === 0 ? (
+              <div className="rounded-2xl border p-4 text-sm text-muted-foreground">No hay errores recientes para mostrar.</div>
+            ) : (
+              summary.recent_errors.map((event) => (
+                <div key={event.id} className="rounded-2xl border p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="destructive">{event.status}</Badge>
+                    <Badge variant="secondary">{event.event_type}</Badge>
+                    <span className="text-sm font-medium">{event.source || "sin fuente"}</span>
+                  </div>
+                  <p className="mt-2 text-sm">{event.message}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {event.entity_type || "evento"} {event.entity_id ? `#${event.entity_id}` : ""} · {new Date(event.created_at).toLocaleString("es-CO")}
+                  </p>
+                </div>
+              ))
+            )}
+          </div>
+        </CardContent>
+      </Card>
       <MobileRoleNav />
     </div>
   );

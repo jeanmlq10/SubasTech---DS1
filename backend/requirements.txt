@@ -1,7 +1,12 @@
 Django
 djangorestframework
+djangorestframework-simplejwt
 django-cors-headers
 psycopg2-binary
+Pillow
 python-decouple
+python-dotenv
 requests
 gunicorn
+python-telegram-bot==21.0
+google-genai

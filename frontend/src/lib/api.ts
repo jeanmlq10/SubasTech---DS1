@@ -1,4 +1,9 @@
-export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
+function normalizeApiUrl(value: string | undefined): string {
+  const raw = (value ?? "http://localhost:8000/api").trim().replace(/\/+$/, "");
+  return raw.endsWith("/api") ? raw : `${raw}/api`;
+}
+
+export const API_URL = normalizeApiUrl(process.env.NEXT_PUBLIC_API_URL);
 
 export type User = {
   id: number;
@@ -7,7 +12,10 @@ export type User = {
   last_name: string;
   email: string;
   role: "client" | "technician" | "admin" | "arbiter";
+  technician_trade: "electrician" | "plumber" | "locksmith" | "general-handyman" | "";
   phone_number: string;
+  address: string;
+  telegram_chat_id: string | null;
   whatsapp_id: string | null;
 };
 
@@ -47,6 +55,7 @@ export type TechnicianProfile = {
   completed_services: number;
   service_completion_rate: string;
   zones: Zone[];
+  documents: TechnicianDocument[];
 };
 
 export type OnboardingResponse = {
@@ -59,12 +68,21 @@ export type AdminMetrics = {
   total_technicians: number;
   verified_technicians: number;
   pending_verification: number;
+  pending_technician_documents: number;
+  suspended_technicians: number;
   active_services: number;
   inactive_services: number;
+  total_leads: number;
+  new_leads: number;
+  contacted_leads: number;
+  accepted_leads: number;
+  closed_leads: number;
   open_disputes: number;
   in_review_disputes: number;
   resolved_disputes: number;
   average_rating: number;
+  average_reputation_score: number;
+  recent_integration_errors: number;
   total_categories: number;
   total_zones: number;
 };
@@ -79,8 +97,29 @@ export type AdminTechnicianSummary = {
   response_time_minutes: number;
   service_count: number;
   average_rating: number;
+  document_counts: {
+    pending: number;
+    approved: number;
+    rejected: number;
+  };
   zones: string[];
   created_at: string;
+};
+
+export type TechnicianDocument = {
+  id: number;
+  technician: number;
+  technician_name: string;
+  document_type: "identity" | "certification" | "other";
+  file: string;
+  notes: string;
+  review_status: "pending" | "approved" | "rejected";
+  admin_notes: string;
+  reviewed_by: number | null;
+  reviewed_by_username: string;
+  reviewed_at: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type AdminServiceSummary = {
@@ -110,11 +149,24 @@ export type AdminAlert = {
   message: string;
 };
 
+export type AdminAuditEvent = {
+  id: number;
+  event_type: string;
+  status: string;
+  source: string;
+  entity_type: string;
+  entity_id: string;
+  message: string;
+  created_at: string;
+};
+
 export type AdminSummary = {
   metrics: AdminMetrics;
   recent_technicians: AdminTechnicianSummary[];
   recent_services: AdminServiceSummary[];
   recent_disputes: AdminDisputeSummary[];
+  lead_status_breakdown: Record<string, number>;
+  recent_errors: AdminAuditEvent[];
   role_breakdown: Record<string, number>;
   alerts: AdminAlert[];
 };
@@ -141,7 +193,7 @@ export type ArbiterDispute = {
   decision: string;
   arbiter: number | null;
   arbiter_notes: string;
-  evidence: Array<{ id: number; note: string; created_at: string }>;
+  evidence: Array<{ id: number; uploaded_by: number; file: string | null; note: string; created_at: string }>;
   created_at: string;
   updated_at: string;
   resolved_at: string | null;
@@ -170,6 +222,118 @@ export type TechnicianLead = {
   urgency: string;
   source: string;
   status: "new" | "contacted" | "accepted" | "closed";
+  appointment: {
+    id: number;
+    scheduled_start: string;
+    scheduled_end: string;
+    status: "pending" | "confirmed" | "cancelled" | "rescheduled" | "completed" | "no_show";
+    technician_status: "on_the_way" | "arrived" | "";
+    service_title: string;
+    client_username: string;
+    client_address: string;
+    request_text: string;
+    location: string;
+    created_at: string;
+    updated_at: string;
+  } | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AuctionBid = {
+  id: number;
+  auction: number;
+  auction_title: string;
+  technician: number;
+  technician_name: string;
+  service: number | null;
+  service_title: string | null;
+  amount: string;
+  message: string;
+  estimated_minutes: number;
+  available_from: string | null;
+  status: "pending" | "accepted" | "rejected" | "withdrawn";
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Auction = {
+  id: number;
+  client: number;
+  client_username: string;
+  category: number;
+  category_name: string;
+  zone: number | null;
+  zone_name: string | null;
+  title: string;
+  description: string;
+  location: string;
+  urgency: string;
+  budget_min: string | null;
+  budget_max: string | null;
+  status: "open" | "awarded" | "cancelled" | "expired";
+  source: "telegram" | "dashboard";
+  closes_at: string | null;
+  winning_bid: number | null;
+  metadata: Record<string, unknown>;
+  bids: AuctionBid[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type Appointment = {
+  id: number;
+  client: number;
+  client_username: string;
+  technician: number;
+  technician_name: string;
+  service: number | null;
+  service_title: string | null;
+  lead: number | null;
+  scheduled_start: string;
+  scheduled_end: string;
+  status: "pending" | "confirmed" | "cancelled" | "rescheduled" | "completed" | "no_show";
+  cancellation_reason: string;
+  cancellation_timing: string;
+  reschedule_reason: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Dispute = {
+  id: number;
+  client: number;
+  technician: number;
+  service: number | null;
+  title: string;
+  description: string;
+  ai_summary: string;
+  priority: string;
+  status: "open" | "in_review" | "resolved" | "rejected";
+  decision: "pending" | "favor_client" | "favor_technician" | "partial";
+  arbiter: number | null;
+  arbiter_notes: string;
+  evidence: Array<{ id: number; uploaded_by: number; file: string | null; note: string; created_at: string }>;
+  created_at: string;
+  updated_at: string;
+  resolved_at: string | null;
+};
+
+export type Rating = {
+  id: number;
+  author: number;
+  author_username: string;
+  target_role: "technician" | "client";
+  technician: number | null;
+  technician_name: string;
+  client: number | null;
+  client_username: string;
+  lead: number | null;
+  service: number | null;
+  score: number;
+  comment: string;
   created_at: string;
   updated_at: string;
 };

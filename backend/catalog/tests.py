@@ -1,8 +1,9 @@
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from .models import Category, Service, TechnicianProfile, Zone
+from .models import Category, Service, TechnicianDocument, TechnicianProfile, Zone
 
 
 class TechnicianOnboardingTests(TestCase):
@@ -165,13 +166,131 @@ class AdminCatalogPermissionTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
 
+    def test_non_admin_cannot_create_service_from_public_services_endpoint(self):
+        category = Category.objects.create(name="Plumber", slug="plumber")
+        technician_user = self.user_model.objects.create_user(username="tech-public", password="Password123", role="technician")
+        technician = TechnicianProfile.objects.create(user=technician_user)
+        self.client.force_authenticate(self.regular_user)
+
+        response = self.client.post(
+            "/api/services/",
+            {
+                "technician_id": technician.id,
+                "category_id": category.id,
+                "title": "Instalacion de llave",
+                "description": "Servicio no autorizado desde endpoint publico.",
+                "base_price": "55000.00",
+                "is_active": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_technician_cannot_update_another_technician_profile(self):
+        technician_user = self.user_model.objects.create_user(username="owner-tech", password="Password123", role="technician")
+        other_user = self.user_model.objects.create_user(username="other-tech", password="Password123", role="technician")
+        profile = TechnicianProfile.objects.create(user=technician_user, bio="Original bio")
+        TechnicianProfile.objects.create(user=other_user)
+        self.client.force_authenticate(other_user)
+
+        response = self.client.patch(
+            f"/api/technicians/{profile.id}/",
+            {"bio": "Intento de cambio"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+
+class TechnicianDocumentWorkflowTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user_model = get_user_model()
+        self.admin = self.user_model.objects.create_user(username="doc-admin", password="Password123", role="admin")
+        self.tech_user = self.user_model.objects.create_user(username="doc-tech", password="Password123", role="technician")
+        self.other_user = self.user_model.objects.create_user(username="doc-other", password="Password123", role="technician")
+        self.profile = TechnicianProfile.objects.create(user=self.tech_user)
+        TechnicianProfile.objects.create(user=self.other_user)
+
+    def _upload_file(self, name="document.pdf"):
+        return SimpleUploadedFile(name, b"fake-pdf-content", content_type="application/pdf")
+
+    def test_technician_can_upload_own_document(self):
+        self.client.force_authenticate(self.tech_user)
+
+        response = self.client.post(
+            "/api/technician/documents/",
+            {"document_type": "identity", "file": self._upload_file(), "notes": "Cedula"},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["review_status"], TechnicianDocument.ReviewStatus.PENDING)
+        self.assertEqual(TechnicianDocument.objects.get().technician, self.profile)
+
+    def test_technician_only_reads_own_documents(self):
+        TechnicianDocument.objects.create(technician=self.profile, document_type="identity", file="a.pdf")
+        other_profile = self.other_user.technician_profile
+        TechnicianDocument.objects.create(technician=other_profile, document_type="identity", file="b.pdf")
+        self.client.force_authenticate(self.tech_user)
+
+        response = self.client.get("/api/technician/documents/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()), 1)
+        self.assertEqual(response.json()[0]["technician"], self.profile.id)
+
+    def test_admin_can_reject_document_with_notes(self):
+        document = TechnicianDocument.objects.create(technician=self.profile, document_type="identity", file="a.pdf")
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.patch(
+            f"/api/technician/documents/{document.id}/",
+            {"review_status": "rejected", "admin_notes": "Documento borroso"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        document.refresh_from_db()
+        self.assertEqual(document.review_status, TechnicianDocument.ReviewStatus.REJECTED)
+        self.assertEqual(document.admin_notes, "Documento borroso")
+        self.assertEqual(document.reviewed_by, self.admin)
+        self.assertIsNotNone(document.reviewed_at)
+
+    def test_rejected_document_can_be_uploaded_again_by_owner(self):
+        document = TechnicianDocument.objects.create(
+            technician=self.profile,
+            document_type="identity",
+            file="old.pdf",
+            review_status=TechnicianDocument.ReviewStatus.REJECTED,
+            admin_notes="Vencido",
+            reviewed_by=self.admin,
+        )
+        self.client.force_authenticate(self.tech_user)
+
+        response = self.client.patch(
+            f"/api/technician/documents/{document.id}/",
+            {"file": self._upload_file("new.pdf"), "notes": "Documento actualizado"},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        document.refresh_from_db()
+        self.assertEqual(document.review_status, TechnicianDocument.ReviewStatus.PENDING)
+        self.assertEqual(document.admin_notes, "")
+        self.assertIsNone(document.reviewed_by)
+
 
 class DemoSeedTests(TestCase):
     def test_seed_demo_data_creates_project_demo_records_idempotently(self):
         from django.core.management import call_command
         from django.contrib.auth import get_user_model
+        from appointments.models import Appointment
+        from auctions.models import Auction
         from disputes.models import Dispute
         from leads.models import ServiceLead
+        from reputation.models import Rating
 
         call_command("seed_demo_data")
         call_command("seed_demo_data")
@@ -180,7 +299,12 @@ class DemoSeedTests(TestCase):
         self.assertTrue(user_model.objects.filter(username="demo_admin", role="admin").exists())
         self.assertTrue(user_model.objects.filter(username="demo_arbiter", role="arbiter").exists())
         self.assertTrue(user_model.objects.filter(username="tech_carlos", role="technician").exists())
-        self.assertGreaterEqual(TechnicianProfile.objects.filter(is_verified=True).count(), 3)
-        self.assertGreaterEqual(Service.objects.filter(is_active=True).count(), 3)
-        self.assertGreaterEqual(ServiceLead.objects.count(), 3)
-        self.assertGreaterEqual(Dispute.objects.count(), 1)
+        self.assertGreaterEqual(TechnicianProfile.objects.filter(is_verified=True).count(), 30)
+        self.assertGreaterEqual(Service.objects.filter(is_active=True).count(), 30)
+        self.assertGreaterEqual(TechnicianProfile.objects.filter(zones__slug="barranquilla-riomar").count(), 3)
+        self.assertGreaterEqual(TechnicianProfile.objects.filter(zones__slug="barranquilla-boston").count(), 2)
+        self.assertEqual(Auction.objects.count(), 0)
+        self.assertEqual(Appointment.objects.count(), 0)
+        self.assertEqual(ServiceLead.objects.count(), 0)
+        self.assertEqual(Dispute.objects.count(), 0)
+        self.assertEqual(Rating.objects.count(), 0)

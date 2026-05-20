@@ -1,23 +1,73 @@
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
 from rest_framework import permissions, status, viewsets
+from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from accounts.models import User
 from accounts.permissions import IsPlatformArbiter
+from audit.models import AuditEvent
+from audit.services import log_audit_event
+from reputation.services import evaluate_automatic_penalties
 from .models import Dispute
-from .serializers import ArbiterDecisionSerializer, ArbiterDisputeSerializer, DisputeSerializer
+from .serializers import ArbiterDecisionSerializer, ArbiterDisputeSerializer, DisputeEvidenceSerializer, DisputeSerializer
 from .services import summarize_dispute
 
 
 class DisputeViewSet(viewsets.ModelViewSet):
-    queryset = Dispute.objects.select_related("client", "technician__user", "service", "arbiter").prefetch_related("evidence")
+    queryset = Dispute.objects.all()
     serializer_class = DisputeSerializer
     permission_classes = [permissions.IsAuthenticated]
 
+    def get_queryset(self):
+        queryset = Dispute.objects.select_related("client", "technician__user", "service", "arbiter").prefetch_related("evidence")
+        user = self.request.user
+
+        if user.is_staff or user.is_superuser or getattr(user, "role", "") in {User.Role.ADMIN, User.Role.ARBITER}:
+            return queryset
+        if getattr(user, "role", "") == User.Role.TECHNICIAN:
+            return queryset.filter(technician__user=user)
+        return queryset.filter(client=user)
+
     def perform_create(self, serializer):
+        if self.request.user.role != User.Role.CLIENT:
+            raise PermissionDenied("Only client users can open disputes.")
         description = serializer.validated_data.get("description", "")
-        serializer.save(client=self.request.user, ai_summary=summarize_dispute(description))
+        dispute = serializer.save(client=self.request.user, ai_summary=summarize_dispute(description))
+        log_audit_event(
+            event_type=AuditEvent.EventType.DISPUTE_CREATED,
+            actor=self.request.user,
+            source="disputes.create",
+            entity_type="dispute",
+            entity_id=dispute.id,
+            status="success",
+            message="Dispute created by client",
+            metadata={"technician_id": dispute.technician_id, "service_id": dispute.service_id},
+        )
+
+    @action(detail=True, methods=["post"])
+    def evidence(self, request, pk=None):
+        dispute = self.get_object()
+        if dispute.status == Dispute.Status.RESOLVED:
+            return Response({"detail": "Resolved disputes cannot receive more evidence."}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = DisputeEvidenceSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(dispute=dispute, uploaded_by=request.user)
+        log_audit_event(
+            event_type=AuditEvent.EventType.ADMIN_ACTION,
+            actor=request.user,
+            source="disputes.evidence",
+            entity_type="dispute",
+            entity_id=dispute.id,
+            status="success",
+            message="Dispute evidence added",
+            metadata={"dispute_id": dispute.id, "role": getattr(request.user, "role", "")},
+        )
+        dispute.refresh_from_db()
+        return Response(DisputeSerializer(dispute, context=self.get_serializer_context()).data, status=status.HTTP_201_CREATED)
 
 
 class ArbiterQueueAPIView(APIView):
@@ -72,6 +122,17 @@ class ArbiterDecisionAPIView(APIView):
             arbiter=request.user,
             notes=serializer.validated_data.get("notes", ""),
         )
+        evaluate_automatic_penalties(dispute.technician)
+        log_audit_event(
+            event_type=AuditEvent.EventType.DISPUTE_RESOLVED,
+            actor=request.user,
+            source="arbiter.disputes.decision",
+            entity_type="dispute",
+            entity_id=dispute.id,
+            status="success",
+            message="Dispute resolved by arbiter",
+            metadata={"decision": dispute.decision, "technician_id": dispute.technician_id},
+        )
         return Response(ArbiterDisputeSerializer(dispute).data)
 
 
@@ -85,4 +146,14 @@ class ArbiterClaimAPIView(APIView):
         dispute.status = Dispute.Status.IN_REVIEW
         dispute.arbiter = request.user
         dispute.save(update_fields=["status", "arbiter", "updated_at"])
+        log_audit_event(
+            event_type=AuditEvent.EventType.DISPUTE_CLAIMED,
+            actor=request.user,
+            source="arbiter.disputes.claim",
+            entity_type="dispute",
+            entity_id=dispute.id,
+            status="success",
+            message="Dispute claimed by arbiter",
+            metadata={"technician_id": dispute.technician_id},
+        )
         return Response(ArbiterDisputeSerializer(dispute).data)

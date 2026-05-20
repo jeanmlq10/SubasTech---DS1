@@ -2,8 +2,10 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
 
+from audit.models import AuditEvent
 from catalog.models import Category, Service, TechnicianProfile, Zone
 from disputes.models import Dispute
+from leads.models import ServiceLead
 from reputation.models import Rating
 
 
@@ -37,7 +39,37 @@ class AdminSummaryTests(TestCase):
             description="Servicio residencial",
             base_price=80000,
         )
-        Rating.objects.create(technician=profile, client=self.client_user, service=service, score=5)
+        ServiceLead.objects.create(
+            technician=profile,
+            client_user=self.client_user,
+            service=service,
+            client_phone="573001112233",
+            message="Necesito una visita",
+            status=ServiceLead.Status.NEW,
+        )
+        ServiceLead.objects.create(
+            technician=profile,
+            client_user=self.client_user,
+            service=service,
+            client_phone="573001112233",
+            message="Ya me contactaron",
+            status=ServiceLead.Status.CONTACTED,
+        )
+        ServiceLead.objects.create(
+            technician=profile,
+            client_user=self.client_user,
+            service=service,
+            client_phone="573001112233",
+            message="Trabajo cerrado",
+            status=ServiceLead.Status.CLOSED,
+        )
+        Rating.objects.create(
+            author=self.client_user,
+            technician=profile,
+            service=service,
+            target_role=Rating.TargetRole.TECHNICIAN,
+            score=5,
+        )
         Dispute.objects.create(
             client=self.client_user,
             technician=profile,
@@ -45,6 +77,14 @@ class AdminSummaryTests(TestCase):
             title="Trabajo incompleto",
             description="El servicio no quedo terminado.",
             priority="high",
+        )
+        AuditEvent.objects.create(
+            event_type=AuditEvent.EventType.INTEGRATION_ERROR,
+            source="telegram_bot.send_message",
+            status="error",
+            entity_type="conversation",
+            entity_id="573001112233",
+            message="Telegram API timeout",
         )
 
     def test_admin_role_can_read_summary(self):
@@ -57,6 +97,13 @@ class AdminSummaryTests(TestCase):
         self.assertEqual(body["metrics"]["total_technicians"], 1)
         self.assertEqual(body["metrics"]["pending_verification"], 1)
         self.assertEqual(body["metrics"]["open_disputes"], 1)
+        self.assertEqual(body["metrics"]["total_leads"], 3)
+        self.assertEqual(body["metrics"]["new_leads"], 1)
+        self.assertEqual(body["metrics"]["contacted_leads"], 1)
+        self.assertEqual(body["metrics"]["closed_leads"], 1)
+        self.assertEqual(body["metrics"]["recent_integration_errors"], 1)
+        self.assertEqual(body["lead_status_breakdown"]["new"], 1)
+        self.assertEqual(body["recent_errors"][0]["source"], "telegram_bot.send_message")
         self.assertEqual(body["recent_technicians"][0]["name"], "Carlos Mendoza")
         self.assertTrue(body["alerts"])
 
@@ -66,6 +113,17 @@ class AdminSummaryTests(TestCase):
         response = self.client.get("/api/admin/summary/")
 
         self.assertEqual(response.status_code, 403)
+
+    def test_summary_counts_suspended_technicians(self):
+        self.tech_user.is_active = False
+        self.tech_user.save(update_fields=["is_active"])
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.get("/api/admin/summary/")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["metrics"]["suspended_technicians"], 1)
 
 
 class AdminTechnicianActionTests(TestCase):
@@ -94,6 +152,7 @@ class AdminTechnicianActionTests(TestCase):
         self.assertEqual(activate_response.status_code, 200)
         self.tech_user.refresh_from_db()
         self.assertTrue(self.tech_user.is_active)
+        self.assertEqual(AuditEvent.objects.filter(event_type=AuditEvent.EventType.ADMIN_ACTION).count(), 3)
 
     def test_non_admin_cannot_moderate_technician(self):
         self.client.force_authenticate(self.client_user)

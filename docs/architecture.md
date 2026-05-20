@@ -1,27 +1,27 @@
 # Arquitectura de SubasTech
 
-SubasTech usa una arquitectura separada entre frontend y backend. El frontend en Next.js servira como interfaz administrativa y de soporte. El backend en Django + Django REST Framework expondra la API REST, recibira webhooks de WhatsApp, consultara PostgreSQL y se integrara con Ollama para interpretar mensajes.
+SubasTech usa una arquitectura separada entre frontend y backend. El frontend en Next.js sirve como interfaz administrativa y de soporte. El backend en Django + Django REST Framework expone la API REST, recibe webhooks de Telegram, consulta PostgreSQL o SQLite y encapsula interpretacion por LLM con fallback por reglas.
 
 ## Flujo Textual
 
 ```text
-Usuario WhatsApp -> Meta Cloud API -> Webhook Django -> Chatbot -> LLM Ollama -> PostgreSQL -> Respuesta WhatsApp
+Usuario Telegram -> Telegram Bot API -> Webhook Django -> Flujo conversacional -> LLM -> PostgreSQL/SQLite -> Respuesta Telegram
 ```
 
 ## Responsabilidad de Cada Modulo
 
-- `users`: administrar usuarios internos, roles y permisos futuros.
-- `technicians`: gestionar tecnicos, especialidades, zonas de cobertura y disponibilidad.
+- `accounts`: administrar usuarios, roles y autenticacion.
+- `catalog`: gestionar tecnicos, especialidades, zonas de cobertura y disponibilidad.
 - `appointments`: manejar citas, estados, cancelaciones y reagendamientos.
-- `chatbot`: coordinar el flujo conversacional, estados de conversacion e intenciones.
-- `whatsapp`: recibir eventos por webhook y enviar respuestas mediante Meta WhatsApp Cloud API.
-- `llm`: comunicarse por HTTP con Ollama y Llama 3.1 8B para interpretar mensajes.
+- `telegram_bot`: coordinar el flujo conversacional, historial, webhook y canal Telegram.
+- `llm`: encapsular interpretacion de mensajes via proveedor externo y fallback local.
+- `notifications`: plantillas, registros y payloads enriquecidos de salida.
 
 ## Decisiones Tecnicas Iniciales
 
 - Separar frontend y backend para permitir despliegues independientes.
 - Usar Django REST Framework para exponer endpoints claros y versionables.
 - Usar PostgreSQL como base de datos principal por su confiabilidad y capacidad relacional.
-- Ejecutar el LLM localmente con Ollama para mantener control sobre costos, privacidad y experimentacion.
-- Encapsular WhatsApp y Ollama en modulos separados para evitar acoplar integraciones externas con la logica de negocio.
+- Encapsular el proveedor LLM en una app separada para evitar acoplar integraciones externas con el flujo conversacional.
+- Mantener el canal conversacional desacoplado de la logica de negocio de citas, reputacion y notificaciones.
 - Mantener el MVP enfocado en agendamiento conversacional antes de incorporar pagos, disputas o subastas.
