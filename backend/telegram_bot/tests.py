@@ -205,6 +205,7 @@ class TelegramBotTests(TestCase):
         self.assertEqual(auction_response.status_code, 200)
         self.assertEqual(auction_response.json()["step"], "initial")
         self.assertIn("Subasta creada", auction_response.json()["reply"])
+        self.assertIn("http://localhost:3000/login?telegram_chat_id=101", auction_response.json()["reply"])
         self.assertEqual(Auction.objects.count(), 1)
         self.assertEqual(Appointment.objects.count(), 0)
         self.assertEqual(ServiceLead.objects.count(), 0)
@@ -214,6 +215,32 @@ class TelegramBotTests(TestCase):
         self.assertEqual(auction.zone, self.zone)
         self.assertEqual(auction.source, Auction.Source.TELEGRAM)
         self.assertEqual(auction.metadata["chat_id"], 101)
+
+    def test_link_user_claims_anonymous_telegram_auction(self):
+        first_response = self._send_webhook_message("Necesito un electricista en Riomar", chat_id=404)
+        self.assertIn("Tecnicos disponibles", first_response.json()["reply"])
+        auction_response = self._send_webhook_message("0", chat_id=404)
+        self.assertIn("Subasta creada", auction_response.json()["reply"])
+        anonymous_user = ChatSession.objects.get(chat_id=404).user
+        self.assertIsNotNone(anonymous_user)
+        self.assertNotEqual(anonymous_user, self.user)
+        self.assertEqual(Auction.objects.get().client, anonymous_user)
+
+        link_response = self.client.post("/api/chatbot/link-user/", {"chat_id": 404}, format="json")
+
+        self.assertEqual(link_response.status_code, 200)
+        self.assertEqual(link_response.json()["user"], self.user.username)
+        session = ChatSession.objects.get(chat_id=404)
+        anonymous_user.refresh_from_db()
+        self.user.refresh_from_db()
+        self.assertEqual(session.user, self.user)
+        self.assertIsNone(anonymous_user.telegram_chat_id)
+        self.assertEqual(self.user.telegram_chat_id, "404")
+        self.assertEqual(Auction.objects.get().client, self.user)
+
+        auctions_response = self.client.get("/api/auctions/")
+        self.assertEqual(auctions_response.status_code, 200)
+        self.assertEqual(len(auctions_response.json()), 1)
 
     def test_webhook_collects_client_data_and_auto_creates_booking(self):
         first_response = self._send_webhook_message("Necesito un electricista en Riomar", chat_id=202)

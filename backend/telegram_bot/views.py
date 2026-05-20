@@ -303,6 +303,16 @@ def chatbot_link_user(request):
         return Response({"detail": "chat_id must be an integer"}, status=status.HTTP_400_BAD_REQUEST)
 
     session = _get_session(chat_id)
+    previous_user = session.user
+    if previous_user is not None and previous_user.id != request.user.id:
+        Auction.objects.filter(client=previous_user).update(client=request.user)
+        Appointment.objects.filter(client=previous_user).update(client=request.user)
+        ServiceLead.objects.filter(client_user=previous_user).update(client_user=request.user)
+        if previous_user.telegram_chat_id == str(chat_id):
+            previous_user.telegram_chat_id = None
+            previous_user.save(update_fields=["telegram_chat_id"])
+
+    User.objects.filter(telegram_chat_id=str(chat_id)).exclude(pk=request.user.pk).update(telegram_chat_id=None)
     request.user.telegram_chat_id = str(chat_id)
     request.user.save(update_fields=["telegram_chat_id"])
     session.user = request.user
@@ -556,12 +566,14 @@ def _create_auction_from_chat(session: ChatSession, state: dict) -> str:
         metadata={"category_id": category.id, "zone_id": zone.id if zone else None},
     )
     _reset_session(session)
+    dashboard_link = _build_frontend_link("/login", telegram_chat_id=session.chat_id)
     return (
         "Subasta creada para recibir ofertas de tecnicos verificados.\n\n"
         f"Solicitud: {auction.title}\n"
         f"Zona: {auction.location or 'Sin zona'}\n"
         f"Numero de subasta: {auction.id}\n\n"
-        "Cuando un tecnico envie una oferta, podras revisarla desde tu dashboard."
+        "Para revisar y adjudicar ofertas, inicia sesion o registrate aqui:\n"
+        f"{dashboard_link}"
     )
 
 
@@ -1019,6 +1031,12 @@ def _find_zone(location: str | None) -> Zone | None:
 
 def _build_telegram_username(chat_id: int) -> str:
     return f"telegram_{chat_id}"
+
+
+def _build_frontend_link(path: str, **params) -> str:
+    query = "&".join(f"{key}={value}" for key, value in params.items() if value is not None)
+    suffix = f"?{query}" if query else ""
+    return f"{settings.FRONTEND_URL}{path}{suffix}"
 
 
 def _split_full_name(full_name: str) -> tuple[str, str]:
