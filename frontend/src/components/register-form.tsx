@@ -2,26 +2,40 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { Loader2, UserPlus } from "lucide-react";
 
-import { loginWithPassword, registerUser } from "@/lib/auth";
+import { loginWithPassword, registerUser, roleHome } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+
+const TECHNICIAN_PROFESSIONS = [
+  { value: "electrician", label: "Electricista" },
+  { value: "plumber", label: "Plomero" },
+  { value: "locksmith", label: "Cerrajero" },
+  { value: "general-handyman", label: "Mantenimiento general" },
+];
+
+const TECHNICIAN_ROLE_STORAGE_KEY = "subastech.technicianProfession";
 
 export function RegisterForm() {
   const router = useRouter();
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [phoneNumber, setPhoneNumber] = useState("");
-  const [address, setAddress] = useState("");
   const [role, setRole] = useState<"client" | "technician">("client");
+  const [technicianProfession, setTechnicianProfession] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("Crea tu cuenta para acceder a tu dashboard personal.");
 
   const isTechnician = role === "technician";
+
+  useEffect(() => {
+    if (!isTechnician) {
+      setTechnicianProfession("");
+    }
+  }, [isTechnician]);
 
   async function submitRegister(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -31,16 +45,19 @@ export function RegisterForm() {
     try {
       await registerUser({
         username,
-        email,
+        email: isTechnician ? undefined : email,
         password,
         role,
-        ...(isTechnician && {
-          phone_number: phoneNumber || undefined,
-          address: address || undefined,
-        }),
       });
-      await loginWithPassword(username, password);
-      router.push("/dashboard");
+      const session = await loginWithPassword(username, password);
+      if (typeof window !== "undefined") {
+        if (isTechnician && technicianProfession) {
+          window.localStorage.setItem(TECHNICIAN_ROLE_STORAGE_KEY, technicianProfession);
+        } else {
+          window.localStorage.removeItem(TECHNICIAN_ROLE_STORAGE_KEY);
+        }
+      }
+      router.push(roleHome(session.user.role));
     } catch (error) {
       const detail = error instanceof Error ? error.message : "No se pudo completar el registro.";
       setMessage(detail);
@@ -53,7 +70,7 @@ export function RegisterForm() {
     <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-950">
       <div className="relative flex min-h-screen flex-col items-center justify-center px-4 py-8 sm:px-6 lg:px-8">
         <div className="w-full max-w-md">
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-8 backdrop-blur-md shadow-2xl">
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-8 shadow-2xl backdrop-blur-md">
             <div className="mb-6 space-y-3 text-center">
               <div className="flex justify-center">
                 <div className="inline-flex size-14 items-center justify-center rounded-full bg-gradient-to-br from-orange-400 to-rose-500 text-white shadow-lg">
@@ -83,6 +100,31 @@ export function RegisterForm() {
                   </option>
                 </select>
               </div>
+
+              {isTechnician && (
+                <div className="space-y-2">
+                  <Label htmlFor="technician-profession" className="text-white">
+                    Rol técnico
+                  </Label>
+                  <select
+                    id="technician-profession"
+                    value={technicianProfession}
+                    onChange={(event) => setTechnicianProfession(event.target.value)}
+                    className="flex h-9 w-full rounded-md border border-white/20 bg-white/10 px-3 py-1 text-sm text-white"
+                    required
+                  >
+                    <option value="" className="text-slate-900">
+                      Selecciona tu profesión
+                    </option>
+                    {TECHNICIAN_PROFESSIONS.map((profession) => (
+                      <option key={profession.value} value={profession.value} className="text-slate-900">
+                        {profession.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div className="space-y-2">
                 <Label htmlFor="username" className="text-white">
                   Usuario
@@ -96,20 +138,24 @@ export function RegisterForm() {
                   required
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="email" className="text-white">
-                  Correo
-                </Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  className="border-white/20 bg-white/10 text-white placeholder:text-white/50"
-                  placeholder="tu@correo.com"
-                  required
-                />
-              </div>
+
+              {!isTechnician && (
+                <div className="space-y-2">
+                  <Label htmlFor="email" className="text-white">
+                    Correo
+                  </Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    className="border-white/20 bg-white/10 text-white placeholder:text-white/50"
+                    placeholder="tu@correo.com"
+                    required
+                  />
+                </div>
+              )}
+
               <div className="space-y-2">
                 <Label htmlFor="password" className="text-white">
                   Contraseña
@@ -125,34 +171,7 @@ export function RegisterForm() {
                   required
                 />
               </div>
-              {isTechnician && (
-                <div className="space-y-2">
-                  <Label htmlFor="phone" className="text-white">
-                    Teléfono (opcional)
-                  </Label>
-                  <Input
-                    id="phone"
-                    value={phoneNumber}
-                    onChange={(event) => setPhoneNumber(event.target.value)}
-                    className="border-white/20 bg-white/10 text-white placeholder:text-white/50"
-                    placeholder="+57 300 000 0000"
-                  />
-                </div>
-              )}
-              {isTechnician && (
-                <div className="space-y-2">
-                  <Label htmlFor="address" className="text-white">
-                    Dirección (opcional)
-                  </Label>
-                  <Input
-                    id="address"
-                    value={address}
-                    onChange={(event) => setAddress(event.target.value)}
-                    className="border-white/20 bg-white/10 text-white placeholder:text-white/50"
-                    placeholder="Ciudad, barrio"
-                  />
-                </div>
-              )}
+
               <Button
                 type="submit"
                 className="w-full bg-gradient-to-r from-orange-400 to-rose-500 font-semibold text-white hover:from-orange-500 hover:to-rose-600"
