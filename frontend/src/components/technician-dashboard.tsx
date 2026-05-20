@@ -244,6 +244,31 @@ export function TechnicianDashboard() {
     }
   }
 
+  async function completeAppointment(appointmentId: number) {
+    if (!token) {
+      setMessage("Inicia sesion antes de completar citas.");
+      return;
+    }
+
+    setStatus("loading");
+    try {
+      const response = await fetch(`${API_URL}/appointments/${appointmentId}/complete/`, {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({}),
+      });
+      if (!response.ok) {
+        throw new Error("Appointment complete request failed");
+      }
+      await loadWorkspace(token);
+      setStatus("success");
+      setMessage("Cita marcada como completada.");
+    } catch {
+      setStatus("error");
+      setMessage("No se pudo completar la cita.");
+    }
+  }
+
   async function submitBid(auctionId: number) {
     if (!token) {
       setMessage("Inicia sesion antes de ofertar.");
@@ -575,7 +600,7 @@ export function TechnicianDashboard() {
                         <p className="mt-2 text-sm leading-6 text-purple-100">{appointment?.request_text || lead.message}</p>
                       </div>
 
-                      <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                      <div className="mt-4 grid gap-2 sm:grid-cols-4">
                         <Button
                           size="sm"
                           variant="ghost"
@@ -602,6 +627,16 @@ export function TechnicianDashboard() {
                         >
                           Cerrar lead
                         </Button>
+                        {appointment ? (
+                          <Button
+                            size="sm"
+                            className="bg-gradient-to-r from-emerald-400 to-teal-500 font-semibold text-white hover:from-emerald-500 hover:to-teal-600"
+                            onClick={() => void completeAppointment(appointment.id)}
+                            disabled={isLoading || appointment.status === "completed"}
+                          >
+                            Completar cita
+                          </Button>
+                        ) : null}
                       </div>
                     </div>
                   );

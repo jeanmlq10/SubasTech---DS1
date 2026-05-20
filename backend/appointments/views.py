@@ -100,6 +100,7 @@ class AppointmentViewSet(viewsets.ModelViewSet):
             "retrieve",
             "cancel",
             "reschedule",
+            "confirm_complete",
             "complete",
             "no_show",
         }:
@@ -195,6 +196,19 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         return self._render(updated)
 
     @action(detail=True, methods=["post"])
+    def confirm_complete(self, request, pk=None):
+        appointment = self.get_object()
+        self._require_client_actor(request.user, appointment)
+        serializer = AppointmentCompleteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        updated = _execute_service(
+            complete_appointment,
+            appointment=appointment,
+            actor=request.user,
+        )
+        return self._render(updated)
+
+    @action(detail=True, methods=["post"])
     def no_show(self, request, pk=None):
         appointment = self.get_object()
         self._require_technician_actor(request.user, appointment)
@@ -267,6 +281,19 @@ class AppointmentViewSet(viewsets.ModelViewSet):
             return
         raise PermissionDenied(
             "Only the assigned technician or an administrator can perform this action."
+        )
+
+    def _require_client_actor(self, user, appointment):
+        if (
+            user.is_staff
+            or user.is_superuser
+            or getattr(user, "role", "") == User.Role.ADMIN
+        ):
+            return
+        if appointment.client_id == user.id:
+            return
+        raise PermissionDenied(
+            "Only the appointment client or an administrator can perform this action."
         )
 
     def _render(self, appointment):

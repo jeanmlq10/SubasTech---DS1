@@ -280,3 +280,42 @@ export type Auction = {
   created_at: string;
   updated_at: string;
 };
+
+export type Appointment = {
+  id: number;
+  client: number;
+  client_username: string;
+  technician: number;
+  technician_name: string;
+  service: number | null;
+  service_title: string | null;
+  lead: number | null;
+  scheduled_start: string;
+  scheduled_end: string;
+  status: "pending" | "confirmed" | "cancelled" | "rescheduled" | "completed" | "no_show";
+  cancellation_reason: string;
+  cancellation_timing: string;
+  reschedule_reason: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Dispute = {
+  id: number;
+  client: number;
+  technician: number;
+  service: number | null;
+  title: string;
+  description: string;
+  ai_summary: string;
+  priority: string;
+  status: "open" | "in_review" | "resolved" | "rejected";
+  decision: "pending" | "favor_client" | "favor_technician" | "partial";
+  arbiter: number | null;
+  arbiter_notes: string;
+  evidence: Array<{ id: number; note: string; created_at: string }>;
+  created_at: string;
+  updated_at: string;
+  resolved_at: string | null;
+};

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { Calendar, ClipboardList, LayoutDashboard, LogOut, MessageCircle, Settings, User } from "lucide-react";
 
-import { API_URL, Auction, Category, Zone } from "@/lib/api";
+import { API_URL, Appointment, Auction, Category, Dispute, Zone } from "@/lib/api";
 import { clearStoredAuth, restoreSession, roleHome } from "@/lib/auth";
 import { MobileRoleNav } from "@/components/mobile-role-nav";
 import { Badge } from "@/components/ui/badge";
@@ -33,6 +33,8 @@ export function ClientDashboard() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
   const [auctions, setAuctions] = useState<Auction[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [disputes, setDisputes] = useState<Dispute[]>([]);
   const [message, setMessage] = useState("Cargando dashboard...");
   const [isBooting, setIsBooting] = useState(true);
   const [auctionForm, setAuctionForm] = useState({
@@ -73,17 +75,21 @@ export function ClientDashboard() {
 
   async function loadClientData(accessToken: string) {
     try {
-      const [categoryResponse, zoneResponse, auctionResponse] = await Promise.all([
+      const [categoryResponse, zoneResponse, auctionResponse, appointmentResponse, disputeResponse] = await Promise.all([
         fetch(`${API_URL}/categories/`),
         fetch(`${API_URL}/zones/`),
         fetch(`${API_URL}/auctions/`, { headers: { Authorization: `Bearer ${accessToken}` } }),
+        fetch(`${API_URL}/appointments/`, { headers: { Authorization: `Bearer ${accessToken}` } }),
+        fetch(`${API_URL}/disputes/`, { headers: { Authorization: `Bearer ${accessToken}` } }),
       ]);
-      if (!categoryResponse.ok || !zoneResponse.ok || !auctionResponse.ok) {
+      if (!categoryResponse.ok || !zoneResponse.ok || !auctionResponse.ok || !appointmentResponse.ok || !disputeResponse.ok) {
         throw new Error("Client data request failed");
       }
       setCategories((await categoryResponse.json()) as Category[]);
       setZones((await zoneResponse.json()) as Zone[]);
       setAuctions((await auctionResponse.json()) as Auction[]);
+      setAppointments((await appointmentResponse.json()) as Appointment[]);
+      setDisputes((await disputeResponse.json()) as Dispute[]);
       setMessage("Dashboard actualizado.");
     } catch {
       setMessage("No se pudo cargar la informacion de subastas.");
@@ -144,6 +150,61 @@ export function ClientDashboard() {
     }
   }
 
+  async function confirmAppointmentComplete(appointmentId: number) {
+    if (!token) {
+      setMessage("Inicia sesion antes de confirmar una cita.");
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/appointments/${appointmentId}/confirm_complete/`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!response.ok) {
+        throw new Error("No se pudo confirmar la cita.");
+      }
+      await loadClientData(token);
+      setMessage("Cita confirmada como completada.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo confirmar la cita.");
+    }
+  }
+
+  async function openAppointmentDispute(appointment: Appointment) {
+    if (!token) {
+      setMessage("Inicia sesion antes de abrir una disputa.");
+      return;
+    }
+
+    const reason = window.prompt("Describe brevemente el problema con esta cita.");
+    if (!reason?.trim()) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/disputes/`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          technician: appointment.technician,
+          service: appointment.service,
+          title: `Disputa por cita #${appointment.id}`,
+          description: reason.trim(),
+          priority: "normal",
+        }),
+      });
+      if (!response.ok) {
+        throw new Error("No se pudo abrir la disputa.");
+      }
+      await loadClientData(token);
+      setMessage("Disputa abierta. Un arbitro revisara el caso.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo abrir la disputa.");
+    }
+  }
+
   function logout() {
     clearStoredAuth();
     router.replace("/login");
@@ -153,11 +214,13 @@ export function ClientDashboard() {
   const awardedAuctions = auctions.filter((auction) => auction.status === "awarded");
   const receivedBids = auctions.reduce((total, auction) => total + auction.bids.length, 0);
   const closedAuctions = auctions.filter((auction) => ["cancelled", "expired"].includes(auction.status)).length;
+  const activeAppointments = appointments.filter((appointment) => ["pending", "confirmed", "rescheduled"].includes(appointment.status));
+  const completedAppointments = appointments.filter((appointment) => appointment.status === "completed");
   const statCards = [
     { title: "Solicitudes activas", value: String(openAuctions.length), detail: `${auctions.length} solicitudes totales` },
-    { title: "Citas adjudicadas", value: String(awardedAuctions.length), detail: "ofertas ganadoras" },
+    { title: "Citas activas", value: String(activeAppointments.length), detail: `${completedAppointments.length} completadas` },
     { title: "Ofertas recibidas", value: String(receivedBids), detail: "de tecnicos verificados" },
-    { title: "Cerradas/canceladas", value: String(closedAuctions), detail: "fuera del flujo activo" },
+    { title: "Disputas abiertas", value: String(disputes.filter((dispute) => dispute.status !== "resolved").length), detail: `${closedAuctions + awardedAuctions.length} solicitudes cerradas/adjudicadas` },
   ];
 
   if (isBooting) {
@@ -354,6 +417,56 @@ export function ClientDashboard() {
               </CardContent>
             </Card>
           </section>
+
+          <Card className={`${surfaceClass} border-white/10 bg-white/5 text-white`}>
+            <CardHeader>
+              <CardTitle className="text-white">Mis citas</CardTitle>
+              <CardDescription className="text-purple-200">Confirma servicios completados o abre una disputa si algo salio mal.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Separator className="mb-4 bg-white/10" />
+              <div className="grid gap-3">
+                {appointments.length === 0 ? (
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-purple-200">Aun no tienes citas creadas.</div>
+                ) : (
+                  appointments.map((appointment) => (
+                    <div key={appointment.id} className="rounded-2xl border border-white/10 bg-white/[0.07] p-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <p className="text-xs uppercase tracking-[0.24em] text-orange-200">Cita #{appointment.id}</p>
+                          <h3 className="mt-2 font-semibold text-white">{appointment.service_title || "Servicio tecnico"}</h3>
+                          <p className="mt-1 text-sm text-purple-200">Tecnico: {appointment.technician_name}</p>
+                          <p className="mt-1 text-sm text-purple-200">
+                            {new Date(appointment.scheduled_start).toLocaleString("es-CO")} - {new Date(appointment.scheduled_end).toLocaleTimeString("es-CO", { hour: "numeric", minute: "2-digit" })}
+                          </p>
+                        </div>
+                        <Badge className="border-white/10 bg-white/10 text-purple-100 hover:bg-white/10">{appointment.status}</Badge>
+                      </div>
+                      <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                        <Button
+                          size="sm"
+                          className="bg-gradient-to-r from-orange-400 to-rose-500 font-semibold text-white hover:from-orange-500 hover:to-rose-600"
+                          disabled={!["pending", "confirmed", "rescheduled"].includes(appointment.status)}
+                          onClick={() => void confirmAppointmentComplete(appointment.id)}
+                        >
+                          Confirmar completado
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="border border-white/10 text-purple-100 hover:bg-white/10 hover:text-white"
+                          disabled={appointment.status === "cancelled" || appointment.status === "no_show"}
+                          onClick={() => void openAppointmentDispute(appointment)}
+                        >
+                          Abrir disputa
+                        </Button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </CardContent>
+          </Card>
 
           <section className="grid gap-4 lg:grid-cols-2">
             <Card className={`${surfaceClass} border-white/10 bg-white/5 text-white`}>
