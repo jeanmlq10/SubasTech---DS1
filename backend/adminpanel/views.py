@@ -7,7 +7,7 @@ from accounts.models import User
 from accounts.permissions import IsPlatformAdmin
 from audit.models import AuditEvent
 from audit.services import log_audit_event
-from catalog.models import Category, Service, TechnicianProfile, Zone
+from catalog.models import Category, Service, TechnicianDocument, TechnicianProfile, Zone
 from disputes.models import Dispute
 from leads.models import ServiceLead
 from reputation.models import Rating
@@ -44,6 +44,9 @@ class AdminSummaryAPIView(APIView):
             "total_technicians": technicians.count(),
             "verified_technicians": technicians.filter(is_verified=True).count(),
             "pending_verification": technicians.filter(is_verified=False).count(),
+            "pending_technician_documents": TechnicianDocument.objects.filter(
+                review_status=TechnicianDocument.ReviewStatus.PENDING
+            ).count(),
             "suspended_technicians": technicians.filter(user__is_active=False).count(),
             "active_services": services.filter(is_active=True).count(),
             "inactive_services": services.filter(is_active=False).count(),
@@ -94,6 +97,11 @@ class AdminSummaryAPIView(APIView):
             "response_time_minutes": technician.response_time_minutes,
             "service_count": technician.service_count,
             "average_rating": round(float(technician.avg_rating or 0), 2),
+            "document_counts": {
+                "pending": technician.documents.filter(review_status=TechnicianDocument.ReviewStatus.PENDING).count(),
+                "approved": technician.documents.filter(review_status=TechnicianDocument.ReviewStatus.APPROVED).count(),
+                "rejected": technician.documents.filter(review_status=TechnicianDocument.ReviewStatus.REJECTED).count(),
+            },
             "zones": [zone.name for zone in technician.zones.all()],
             "created_at": technician.created_at.isoformat(),
         }

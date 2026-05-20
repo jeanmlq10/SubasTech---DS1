@@ -1,8 +1,9 @@
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from .models import Category, Service, TechnicianProfile, Zone
+from .models import Category, Service, TechnicianDocument, TechnicianProfile, Zone
 
 
 class TechnicianOnboardingTests(TestCase):
@@ -200,6 +201,85 @@ class AdminCatalogPermissionTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 403)
+
+
+class TechnicianDocumentWorkflowTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user_model = get_user_model()
+        self.admin = self.user_model.objects.create_user(username="doc-admin", password="Password123", role="admin")
+        self.tech_user = self.user_model.objects.create_user(username="doc-tech", password="Password123", role="technician")
+        self.other_user = self.user_model.objects.create_user(username="doc-other", password="Password123", role="technician")
+        self.profile = TechnicianProfile.objects.create(user=self.tech_user)
+        TechnicianProfile.objects.create(user=self.other_user)
+
+    def _upload_file(self, name="document.pdf"):
+        return SimpleUploadedFile(name, b"fake-pdf-content", content_type="application/pdf")
+
+    def test_technician_can_upload_own_document(self):
+        self.client.force_authenticate(self.tech_user)
+
+        response = self.client.post(
+            "/api/technician/documents/",
+            {"document_type": "identity", "file": self._upload_file(), "notes": "Cedula"},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["review_status"], TechnicianDocument.ReviewStatus.PENDING)
+        self.assertEqual(TechnicianDocument.objects.get().technician, self.profile)
+
+    def test_technician_only_reads_own_documents(self):
+        TechnicianDocument.objects.create(technician=self.profile, document_type="identity", file="a.pdf")
+        other_profile = self.other_user.technician_profile
+        TechnicianDocument.objects.create(technician=other_profile, document_type="identity", file="b.pdf")
+        self.client.force_authenticate(self.tech_user)
+
+        response = self.client.get("/api/technician/documents/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()), 1)
+        self.assertEqual(response.json()[0]["technician"], self.profile.id)
+
+    def test_admin_can_reject_document_with_notes(self):
+        document = TechnicianDocument.objects.create(technician=self.profile, document_type="identity", file="a.pdf")
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.patch(
+            f"/api/technician/documents/{document.id}/",
+            {"review_status": "rejected", "admin_notes": "Documento borroso"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        document.refresh_from_db()
+        self.assertEqual(document.review_status, TechnicianDocument.ReviewStatus.REJECTED)
+        self.assertEqual(document.admin_notes, "Documento borroso")
+        self.assertEqual(document.reviewed_by, self.admin)
+        self.assertIsNotNone(document.reviewed_at)
+
+    def test_rejected_document_can_be_uploaded_again_by_owner(self):
+        document = TechnicianDocument.objects.create(
+            technician=self.profile,
+            document_type="identity",
+            file="old.pdf",
+            review_status=TechnicianDocument.ReviewStatus.REJECTED,
+            admin_notes="Vencido",
+            reviewed_by=self.admin,
+        )
+        self.client.force_authenticate(self.tech_user)
+
+        response = self.client.patch(
+            f"/api/technician/documents/{document.id}/",
+            {"file": self._upload_file("new.pdf"), "notes": "Documento actualizado"},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        document.refresh_from_db()
+        self.assertEqual(document.review_status, TechnicianDocument.ReviewStatus.PENDING)
+        self.assertEqual(document.admin_notes, "")
+        self.assertIsNone(document.reviewed_by)
 
 
 class DemoSeedTests(TestCase):

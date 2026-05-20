@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "SubasTech",
-  description: "AI-powered WhatsApp-first platform for home technical services.",
+  description: "AI-powered Telegram-first platform for home technical services.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

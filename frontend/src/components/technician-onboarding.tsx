@@ -4,7 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, LogOut, UserCheck } from "lucide-react";
 
-import { API_URL, OnboardingResponse, Zone } from "@/lib/api";
+import { API_URL, OnboardingResponse, TechnicianDocument, Zone } from "@/lib/api";
 import { clearStoredAuth, restoreSession } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +21,10 @@ export function TechnicianOnboarding() {
   const [bio, setBio] = useState("");
   const [availability, setAvailability] = useState("available");
   const [responseTime, setResponseTime] = useState("30");
+  const [documents, setDocuments] = useState<TechnicianDocument[]>([]);
+  const [documentType, setDocumentType] = useState<TechnicianDocument["document_type"]>("identity");
+  const [documentFile, setDocumentFile] = useState<File | null>(null);
+  const [documentNotes, setDocumentNotes] = useState("");
   const [status, setStatus] = useState<ApiState>("loading");
   const [message, setMessage] = useState("Preparando tu perfil tecnico...");
 
@@ -58,6 +62,7 @@ export function TechnicianOnboarding() {
           setAvailability(onboarding.profile.availability_status);
           setResponseTime(String(onboarding.profile.response_time_minutes));
           setSelectedZones(onboarding.profile.zones.map((zone) => zone.id));
+          setDocuments(onboarding.profile.documents ?? []);
         }
         setZones((await zoneResponse.json()) as Zone[]);
         setStatus("idle");
@@ -136,6 +141,40 @@ export function TechnicianOnboarding() {
     } catch {
       setStatus("error");
       setMessage("No se pudo guardar el onboarding.");
+    }
+  }
+
+  async function uploadDocument() {
+    if (!token || !documentFile) {
+      setMessage("Selecciona un archivo antes de subir el documento.");
+      return;
+    }
+
+    setStatus("loading");
+    setMessage("Subiendo documento...");
+    try {
+      const body = new FormData();
+      body.append("document_type", documentType);
+      body.append("file", documentFile);
+      body.append("notes", documentNotes);
+
+      const response = await fetch(`${API_URL}/technician/documents/`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body,
+      });
+      if (!response.ok) {
+        throw new Error("Document upload failed");
+      }
+      const document = (await response.json()) as TechnicianDocument;
+      setDocuments((current) => [document, ...current]);
+      setDocumentFile(null);
+      setDocumentNotes("");
+      setStatus("idle");
+      setMessage("Documento enviado para revision.");
+    } catch {
+      setStatus("error");
+      setMessage("No se pudo subir el documento.");
     }
   }
 
@@ -240,6 +279,64 @@ export function TechnicianOnboarding() {
                       />
                       {zone.name}, {zone.city}
                     </label>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <div>
+                <h2 className="font-semibold text-white">Documentos de verificacion</h2>
+                <p className="mt-1 text-sm text-purple-200">
+                  Sube tu documento de identidad o certificaciones. Un administrador los revisara antes de aprobarte.
+                </p>
+              </div>
+              <div className="mt-4 grid gap-3 sm:grid-cols-[180px_1fr]">
+                <select
+                  value={documentType}
+                  onChange={(event) => setDocumentType(event.target.value as TechnicianDocument["document_type"])}
+                  className="flex h-10 w-full rounded-md border border-white/20 bg-white/10 px-3 py-2 text-sm text-white"
+                >
+                  <option value="identity" className="text-slate-900">
+                    Identidad
+                  </option>
+                  <option value="certification" className="text-slate-900">
+                    Certificacion
+                  </option>
+                  <option value="other" className="text-slate-900">
+                    Otro
+                  </option>
+                </select>
+                <Input
+                  type="file"
+                  onChange={(event) => setDocumentFile(event.target.files?.[0] ?? null)}
+                  className="border-white/20 bg-white/10 text-white file:text-white"
+                />
+              </div>
+              <Textarea
+                value={documentNotes}
+                onChange={(event) => setDocumentNotes(event.target.value)}
+                className="mt-3 min-h-20 border-white/20 bg-white/10 text-white placeholder:text-white/50"
+                placeholder="Notas opcionales para el administrador."
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                className="mt-3 border border-white/10 text-purple-100 hover:bg-white/10 hover:text-white"
+                onClick={() => void uploadDocument()}
+                disabled={isLoading || !documentFile}
+              >
+                Subir documento
+              </Button>
+              <div className="mt-4 grid gap-2">
+                {documents.length === 0 ? (
+                  <p className="text-sm text-purple-200">Aun no has subido documentos.</p>
+                ) : (
+                  documents.map((document) => (
+                    <div key={document.id} className="rounded-lg border border-white/10 bg-slate-950/20 p-3 text-sm text-purple-100">
+                      <span className="font-medium text-white">{document.document_type}</span> - {document.review_status}
+                      {document.admin_notes ? <p className="mt-1 text-purple-200">{document.admin_notes}</p> : null}
+                    </div>
                   ))
                 )}
               </div>

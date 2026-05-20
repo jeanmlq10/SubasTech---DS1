@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, ShieldCheck, Star, Users, Wrench } from "lucide-react";
 
 import { clearStoredAuth, restoreSession } from "@/lib/auth";
-import { AdminSummary, API_URL, Category, Zone } from "@/lib/api";
+import { AdminSummary, API_URL, Category, TechnicianDocument, Zone } from "@/lib/api";
 import { MobileRoleNav } from "@/components/mobile-role-nav";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ const emptySummary: AdminSummary = {
     total_technicians: 0,
     verified_technicians: 0,
     pending_verification: 0,
+    pending_technician_documents: 0,
     suspended_technicians: 0,
     active_services: 0,
     inactive_services: 0,
@@ -53,6 +54,7 @@ export function AdminDashboard() {
   const [summary, setSummary] = useState<AdminSummary>(emptySummary);
   const [categories, setCategories] = useState<Category[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
+  const [documents, setDocuments] = useState<TechnicianDocument[]>([]);
   const [categoryForm, setCategoryForm] = useState({ name: "", description: "" });
   const [zoneForm, setZoneForm] = useState({ name: "", city: "Barranquilla" });
   const [status, setStatus] = useState<ApiState>("idle");
@@ -84,6 +86,7 @@ export function AdminDashboard() {
   const metricCards = useMemo(
     () => [
       { title: "Tecnicos", value: summary.metrics.total_technicians, detail: `${summary.metrics.verified_technicians} verificados`, icon: Users },
+      { title: "Documentos", value: summary.metrics.pending_technician_documents, detail: "pendientes de revision", icon: ShieldCheck },
       { title: "Servicios activos", value: summary.metrics.active_services, detail: `${summary.metrics.inactive_services} inactivos`, icon: Wrench },
       { title: "Disputas abiertas", value: summary.metrics.open_disputes, detail: `${summary.metrics.in_review_disputes} en revision`, icon: AlertTriangle },
       { title: "Rating promedio", value: summary.metrics.average_rating, detail: `${summary.metrics.total_categories} categorias`, icon: Star },
@@ -111,15 +114,50 @@ export function AdminDashboard() {
 
     setStatus("loading");
     try {
-      const response = await fetch(`${API_URL}/admin/summary/`, { headers: { Authorization: `Bearer ${token}` } });
+      const [response, documentResponse] = await Promise.all([
+        fetch(`${API_URL}/admin/summary/`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${API_URL}/technician/documents/`, { headers: { Authorization: `Bearer ${token}` } }),
+      ]);
       if (!response.ok) throw new Error("Admin summary request failed");
+      if (!documentResponse.ok) throw new Error("Technician documents request failed");
       setSummary((await response.json()) as AdminSummary);
+      setDocuments((await documentResponse.json()) as TechnicianDocument[]);
       await loadCatalog();
       setStatus("success");
       setMessage("Admin summary loaded.");
     } catch {
       setStatus("error");
       setMessage("Could not load admin summary. Check that the token belongs to an admin user.");
+    }
+  }
+
+  async function reviewDocument(documentId: number, reviewStatus: "approved" | "rejected") {
+    if (!token) {
+      setMessage("Add an administrator JWT token before reviewing documents.");
+      return;
+    }
+
+    const adminNotes =
+      reviewStatus === "rejected" && typeof window !== "undefined"
+        ? window.prompt("Observaciones para el tecnico", "El documento no cumple los criterios de verificacion.") ?? ""
+        : "";
+
+    setStatus("loading");
+    try {
+      const response = await fetch(`${API_URL}/technician/documents/${documentId}/`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ review_status: reviewStatus, admin_notes: adminNotes }),
+      });
+      if (!response.ok) throw new Error("Document review failed");
+      const updatedDocument = (await response.json()) as TechnicianDocument;
+      setDocuments((current) => current.map((document) => (document.id === updatedDocument.id ? updatedDocument : document)));
+      await loadSummary();
+      setStatus("success");
+      setMessage(reviewStatus === "approved" ? "Documento aprobado." : "Documento rechazado.");
+    } catch {
+      setStatus("error");
+      setMessage("Could not review technician document.");
     }
   }
 
@@ -361,6 +399,7 @@ export function AdminDashboard() {
                   </div>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <Badge variant={technician.is_verified ? "default" : "secondary"}>{technician.is_verified ? "Verificado" : "Pendiente"}</Badge>
+                    <Badge variant="secondary">{technician.document_counts.pending} docs pendientes</Badge>
                     <Badge variant="secondary">{technician.service_count} servicios</Badge>
                     <Badge variant="secondary">{technician.average_rating} rating</Badge>
                   </div>
@@ -398,6 +437,7 @@ export function AdminDashboard() {
                         <div className="flex flex-wrap gap-2">
                           <Badge variant={technician.is_verified ? "default" : "secondary"}>{technician.is_verified ? "Verificado" : "Pendiente"}</Badge>
                           <Badge variant={technician.user_is_active ? "secondary" : "destructive"}>{technician.user_is_active ? "Activo" : "Suspendido"}</Badge>
+                          <Badge variant="secondary">{technician.document_counts.pending} docs pendientes</Badge>
                         </div>
                         <p className="mt-1 text-xs text-muted-foreground">{technician.availability_status} - {technician.average_rating} rating</p>
                       </TableCell>
@@ -418,10 +458,52 @@ export function AdminDashboard() {
         </CardContent>
       </Card>
 
+      <Card>
+        <CardHeader>
+          <CardTitle>Documentos de tecnicos</CardTitle>
+          <CardDescription>Aprueba o rechaza soportes subidos durante el onboarding.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <DataSeparator />
+          {documents.length === 0 ? (
+            <div className="rounded-2xl border p-4 text-sm text-muted-foreground">No hay documentos para revisar.</div>
+          ) : (
+            <div className="grid gap-3">
+              {documents.map((document) => (
+                <div key={document.id} className="rounded-2xl border p-4 shadow-sm">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-medium">{document.technician_name}</p>
+                        <Badge variant={document.review_status === "rejected" ? "destructive" : "secondary"}>{document.review_status}</Badge>
+                        <Badge variant="outline">{document.document_type}</Badge>
+                      </div>
+                      <p className="mt-2 text-sm text-muted-foreground">{document.notes || "Sin notas del tecnico."}</p>
+                      {document.admin_notes ? <p className="mt-1 text-sm text-muted-foreground">Revision admin: {document.admin_notes}</p> : null}
+                      <a className="mt-2 inline-block text-sm font-medium text-primary underline-offset-4 hover:underline" href={document.file} target="_blank" rel="noreferrer">
+                        Ver documento
+                      </a>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="outline" disabled={isLoading || document.review_status === "approved"} onClick={() => void reviewDocument(document.id, "approved")}>
+                        Aprobar
+                      </Button>
+                      <Button size="sm" variant="destructive" disabled={isLoading || document.review_status === "rejected"} onClick={() => void reviewDocument(document.id, "rejected")}>
+                        Rechazar
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <section className="grid gap-6 xl:grid-cols-2">
         <CatalogCard
           title="Categorias"
-          description="Gestiona tipos de servicio usados por WhatsApp y recomendaciones."
+          description="Gestiona tipos de servicio usados por Telegram y recomendaciones."
           items={categories.map((category) => `${category.name}${category.is_active ? "" : " (inactiva)"}`)}
           onSubmit={createCategory}
         >

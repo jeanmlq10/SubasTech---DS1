@@ -130,7 +130,7 @@ export function ClientDashboard() {
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
                 <p>1. Completa tu perfil con teléfono y dirección.</p>
-                <p>2. Solicita un servicio técnico desde WhatsApp o la web.</p>
+                <p>2. Solicita un servicio técnico desde Telegram o la web.</p>
                 <p>3. Revisa el estado de tus citas en este panel.</p>
               </CardContent>
             </Card>

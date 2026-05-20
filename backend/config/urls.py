@@ -13,6 +13,7 @@ from catalog.views import (
     CategoryViewSet,
     ServiceViewSet,
     TechnicianOnboardingAPIView,
+    TechnicianDocumentViewSet,
     TechnicianProfileViewSet,
     TechnicianServicePhotoViewSet,
     TechnicianServiceViewSet,
@@ -34,6 +35,7 @@ router.register("technicians", TechnicianProfileViewSet)
 router.register("services", ServiceViewSet)
 router.register("technician/services", TechnicianServiceViewSet, basename="technician-services")
 router.register("technician/service-photos", TechnicianServicePhotoViewSet, basename="technician-service-photos")
+router.register("technician/documents", TechnicianDocumentViewSet, basename="technician-documents")
 router.register("technician/leads", TechnicianLeadViewSet, basename="technician-leads")
 router.register("ratings", RatingViewSet)
 router.register("penalties", PenaltyViewSet)

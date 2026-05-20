@@ -55,6 +55,7 @@ export type TechnicianProfile = {
   completed_services: number;
   service_completion_rate: string;
   zones: Zone[];
+  documents: TechnicianDocument[];
 };
 
 export type OnboardingResponse = {
@@ -67,6 +68,7 @@ export type AdminMetrics = {
   total_technicians: number;
   verified_technicians: number;
   pending_verification: number;
+  pending_technician_documents: number;
   suspended_technicians: number;
   active_services: number;
   inactive_services: number;
@@ -95,8 +97,29 @@ export type AdminTechnicianSummary = {
   response_time_minutes: number;
   service_count: number;
   average_rating: number;
+  document_counts: {
+    pending: number;
+    approved: number;
+    rejected: number;
+  };
   zones: string[];
   created_at: string;
+};
+
+export type TechnicianDocument = {
+  id: number;
+  technician: number;
+  technician_name: string;
+  document_type: "identity" | "certification" | "other";
+  file: string;
+  notes: string;
+  review_status: "pending" | "approved" | "rejected";
+  admin_notes: string;
+  reviewed_by: number | null;
+  reviewed_by_username: string;
+  reviewed_at: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type AdminServiceSummary = {
