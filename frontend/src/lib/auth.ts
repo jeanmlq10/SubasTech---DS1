@@ -50,7 +50,40 @@ export function roleHome(role: User["role"]): string {
   if (role === "arbiter") {
     return "/arbiter";
   }
-  return "/";
+  return "/dashboard";
+}
+
+export type RegisterPayload = {
+  username: string;
+  email?: string;
+  password: string;
+  role: "client" | "technician";
+  phone_number?: string;
+  address?: string;
+};
+
+export async function registerUser(payload: RegisterPayload): Promise<void> {
+  const response = await fetch(`${API_URL}/auth/register/`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+    const detail =
+      body && typeof body === "object"
+        ? Object.entries(body)
+            .map(([key, value]) => {
+              if (Array.isArray(value)) {
+                return `${key}: ${value.join(", ")}`;
+              }
+              return `${key}: ${String(value)}`;
+            })
+            .join(" · ")
+        : "No se pudo completar el registro.";
+    throw new Error(detail);
+  }
 }
 
 export async function loginWithPassword(username: string, password: string): Promise<AuthSession> {
