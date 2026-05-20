@@ -25,6 +25,19 @@ const sidebarLinks = [
 const surfaceClass = "rounded-2xl border border-white/10 bg-white/5 shadow-2xl backdrop-blur-md";
 const fieldClass = "border-white/20 bg-white/10 text-white placeholder:text-white/50";
 const selectClass = "h-10 w-full rounded-md border border-white/20 bg-white/10 px-3 text-sm text-white";
+const disputeStatusLabel: Record<Dispute["status"], string> = {
+  open: "Abierta",
+  in_review: "En revision",
+  resolved: "Resuelta",
+  rejected: "Rechazada",
+};
+
+const disputeDecisionLabel: Record<Dispute["decision"], string> = {
+  pending: "Pendiente",
+  favor_client: "A favor del cliente",
+  favor_technician: "A favor del tecnico",
+  partial: "Resolucion parcial",
+};
 
 export function ClientDashboard() {
   const router = useRouter();
@@ -205,6 +218,33 @@ export function ClientDashboard() {
       setMessage("Disputa abierta. Un arbitro revisara el caso.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "No se pudo abrir la disputa.");
+    }
+  }
+
+  async function addDisputeEvidence(disputeId: number) {
+    if (!token) {
+      setMessage("Inicia sesion antes de aportar evidencia.");
+      return;
+    }
+
+    const note = window.prompt("Agrega una nota o evidencia textual para el arbitro.");
+    if (!note?.trim()) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/disputes/${disputeId}/evidence/`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ note: note.trim() }),
+      });
+      if (!response.ok) {
+        throw new Error("No se pudo agregar la evidencia.");
+      }
+      await loadClientData(token);
+      setMessage("Evidencia agregada a la disputa.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo agregar la evidencia.");
     }
   }
 
@@ -523,6 +563,66 @@ export function ClientDashboard() {
                           </>
                         );
                       })()}
+                    </div>
+                  ))
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className={`${surfaceClass} border-white/10 bg-white/5 text-white`}>
+            <CardHeader>
+              <CardTitle className="text-white">Mis disputas</CardTitle>
+              <CardDescription className="text-purple-200">Consulta el estado del caso y agrega notas para el arbitro.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Separator className="mb-4 bg-white/10" />
+              <div className="grid gap-3">
+                {disputes.length === 0 ? (
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-purple-200">Aun no tienes disputas abiertas.</div>
+                ) : (
+                  disputes.map((dispute) => (
+                    <div key={dispute.id} className="rounded-2xl border border-white/10 bg-white/[0.07] p-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <p className="text-xs uppercase tracking-[0.24em] text-orange-200">Disputa #{dispute.id}</p>
+                          <h3 className="mt-2 font-semibold text-white">{dispute.title}</h3>
+                          <p className="mt-1 text-sm text-purple-100">{dispute.description}</p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Badge className="border-white/10 bg-white/10 text-purple-100 hover:bg-white/10">
+                            {disputeStatusLabel[dispute.status]}
+                          </Badge>
+                          <Badge className="border-white/10 bg-white/10 text-purple-100 hover:bg-white/10">
+                            {disputeDecisionLabel[dispute.decision]}
+                          </Badge>
+                        </div>
+                      </div>
+                      {dispute.ai_summary ? <p className="mt-3 text-sm text-purple-200">Resumen IA: {dispute.ai_summary}</p> : null}
+                      {dispute.arbiter_notes ? <p className="mt-3 text-sm text-orange-100">Decision arbitro: {dispute.arbiter_notes}</p> : null}
+                      <div className="mt-4 rounded-xl border border-white/10 bg-slate-950/20 p-3">
+                        <p className="text-sm font-medium text-white">Evidencia registrada</p>
+                        {dispute.evidence.length === 0 ? (
+                          <p className="mt-2 text-sm text-purple-200">Sin evidencia adicional.</p>
+                        ) : (
+                          <div className="mt-2 grid gap-2">
+                            {dispute.evidence.map((item) => (
+                              <p key={item.id} className="rounded-lg bg-white/5 p-2 text-sm text-purple-100">
+                                {item.note || "Archivo adjunto"}
+                              </p>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="mt-4 border border-white/10 text-purple-100 hover:bg-white/10 hover:text-white"
+                        disabled={dispute.status === "resolved"}
+                        onClick={() => void addDisputeEvidence(dispute.id)}
+                      >
+                        Agregar evidencia
+                      </Button>
                     </div>
                   ))
                 )}

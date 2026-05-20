@@ -1,6 +1,7 @@
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
 from rest_framework import permissions, status, viewsets
+from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -11,7 +12,7 @@ from audit.models import AuditEvent
 from audit.services import log_audit_event
 from reputation.services import evaluate_automatic_penalties
 from .models import Dispute
-from .serializers import ArbiterDecisionSerializer, ArbiterDisputeSerializer, DisputeSerializer
+from .serializers import ArbiterDecisionSerializer, ArbiterDisputeSerializer, DisputeEvidenceSerializer, DisputeSerializer
 from .services import summarize_dispute
 
 
@@ -45,6 +46,28 @@ class DisputeViewSet(viewsets.ModelViewSet):
             message="Dispute created by client",
             metadata={"technician_id": dispute.technician_id, "service_id": dispute.service_id},
         )
+
+    @action(detail=True, methods=["post"])
+    def evidence(self, request, pk=None):
+        dispute = self.get_object()
+        if dispute.status == Dispute.Status.RESOLVED:
+            return Response({"detail": "Resolved disputes cannot receive more evidence."}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = DisputeEvidenceSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(dispute=dispute, uploaded_by=request.user)
+        log_audit_event(
+            event_type=AuditEvent.EventType.ADMIN_ACTION,
+            actor=request.user,
+            source="disputes.evidence",
+            entity_type="dispute",
+            entity_id=dispute.id,
+            status="success",
+            message="Dispute evidence added",
+            metadata={"dispute_id": dispute.id, "role": getattr(request.user, "role", "")},
+        )
+        dispute.refresh_from_db()
+        return Response(DisputeSerializer(dispute, context=self.get_serializer_context()).data, status=status.HTTP_201_CREATED)
 
 
 class ArbiterQueueAPIView(APIView):

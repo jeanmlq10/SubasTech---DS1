@@ -193,7 +193,7 @@ export type ArbiterDispute = {
   decision: string;
   arbiter: number | null;
   arbiter_notes: string;
-  evidence: Array<{ id: number; note: string; created_at: string }>;
+  evidence: Array<{ id: number; uploaded_by: number; file: string | null; note: string; created_at: string }>;
   created_at: string;
   updated_at: string;
   resolved_at: string | null;
@@ -314,7 +314,7 @@ export type Dispute = {
   decision: "pending" | "favor_client" | "favor_technician" | "partial";
   arbiter: number | null;
   arbiter_notes: string;
-  evidence: Array<{ id: number; note: string; created_at: string }>;
+  evidence: Array<{ id: number; uploaded_by: number; file: string | null; note: string; created_at: string }>;
   created_at: string;
   updated_at: string;
   resolved_at: string | null;
