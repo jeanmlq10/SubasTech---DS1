@@ -17,7 +17,7 @@ import {
   Wrench,
 } from "lucide-react";
 
-import { API_URL, Auction, Category, OnboardingResponse, TechnicianLead, TechnicianService } from "@/lib/api";
+import { API_URL, Auction, Category, Dispute, OnboardingResponse, Rating, TechnicianLead, TechnicianService } from "@/lib/api";
 import { clearStoredAuth, restoreSession } from "@/lib/auth";
 import { MobileRoleNav } from "@/components/mobile-role-nav";
 import { Badge } from "@/components/ui/badge";
@@ -76,6 +76,20 @@ const appointmentStatusLabel: Record<AppointmentStatus, string> = {
   no_show: "No asistio",
 };
 
+const disputeStatusLabel: Record<Dispute["status"], string> = {
+  open: "Abierta",
+  in_review: "En revision",
+  resolved: "Resuelta",
+  rejected: "Rechazada",
+};
+
+const disputeDecisionLabel: Record<Dispute["decision"], string> = {
+  pending: "Pendiente",
+  favor_client: "A favor del cliente",
+  favor_technician: "A favor del tecnico",
+  partial: "Resolucion parcial",
+};
+
 function formatDateTime(value: string) {
   return new Intl.DateTimeFormat("es-CO", {
     dateStyle: "medium",
@@ -98,6 +112,8 @@ export function TechnicianDashboard() {
   const [services, setServices] = useState<TechnicianService[]>([]);
   const [leads, setLeads] = useState<TechnicianLead[]>([]);
   const [auctions, setAuctions] = useState<Auction[]>([]);
+  const [ratings, setRatings] = useState<Rating[]>([]);
+  const [disputes, setDisputes] = useState<Dispute[]>([]);
   const [bidDrafts, setBidDrafts] = useState<Record<number, BidDraft>>({});
   const [serviceForm, setServiceForm] = useState<ServiceForm>(emptyServiceForm);
   const [status, setStatus] = useState<ApiState>("loading");
@@ -129,15 +145,25 @@ export function TechnicianDashboard() {
           Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
         };
-        const [onboardingResponse, categoryResponse, servicesResponse, leadsResponse, auctionsResponse] = await Promise.all([
+        const [onboardingResponse, categoryResponse, servicesResponse, leadsResponse, auctionsResponse, ratingsResponse, disputesResponse] = await Promise.all([
           fetch(`${API_URL}/technician/onboarding/`, { headers: requestHeaders }),
           fetch(`${API_URL}/categories/`),
           fetch(`${API_URL}/technician/services/`, { headers: requestHeaders }),
           fetch(`${API_URL}/technician/leads/`, { headers: requestHeaders }),
           fetch(`${API_URL}/auctions/`, { headers: requestHeaders }),
+          fetch(`${API_URL}/ratings/`, { headers: requestHeaders }),
+          fetch(`${API_URL}/disputes/`, { headers: requestHeaders }),
         ]);
 
-        if (!onboardingResponse.ok || !categoryResponse.ok || !servicesResponse.ok || !leadsResponse.ok || !auctionsResponse.ok) {
+        if (
+          !onboardingResponse.ok ||
+          !categoryResponse.ok ||
+          !servicesResponse.ok ||
+          !leadsResponse.ok ||
+          !auctionsResponse.ok ||
+          !ratingsResponse.ok ||
+          !disputesResponse.ok
+        ) {
           throw new Error("Workspace request failed");
         }
 
@@ -151,6 +177,8 @@ export function TechnicianDashboard() {
         setServices((await servicesResponse.json()) as TechnicianService[]);
         setLeads((await leadsResponse.json()) as TechnicianLead[]);
         setAuctions((await auctionsResponse.json()) as Auction[]);
+        setRatings((await ratingsResponse.json()) as Rating[]);
+        setDisputes((await disputesResponse.json()) as Dispute[]);
         setStatus("success");
         setMessage("Workspace sincronizado.");
       } catch {
@@ -244,6 +272,99 @@ export function TechnicianDashboard() {
     }
   }
 
+  async function notifyOnTheWay(appointmentId: number) {
+    if (!token) return;
+    setStatus("loading");
+    try {
+      const response = await fetch(`${API_URL}/appointments/${appointmentId}/on_the_way/`, {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({}),
+      });
+      if (!response.ok) throw new Error("Request failed");
+      await loadWorkspace(token);
+      setStatus("success");
+      setMessage("Cliente notificado: en camino.");
+    } catch {
+      setStatus("error");
+      setMessage("No se pudo enviar la notificacion.");
+    }
+  }
+
+  async function notifyArrived(appointmentId: number) {
+    if (!token) return;
+    setStatus("loading");
+    try {
+      const response = await fetch(`${API_URL}/appointments/${appointmentId}/arrived/`, {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({}),
+      });
+      if (!response.ok) throw new Error("Request failed");
+      await loadWorkspace(token);
+      setStatus("success");
+      setMessage("Cliente notificado: has llegado.");
+    } catch {
+      setStatus("error");
+      setMessage("No se pudo enviar la notificacion.");
+    }
+  }
+
+  async function completeAppointment(appointmentId: number) {
+    if (!token) {
+      setMessage("Inicia sesion antes de completar citas.");
+      return;
+    }
+
+    setStatus("loading");
+    try {
+      const response = await fetch(`${API_URL}/appointments/${appointmentId}/complete/`, {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({}),
+      });
+      if (!response.ok) {
+        throw new Error("Appointment complete request failed");
+      }
+      await loadWorkspace(token);
+      setStatus("success");
+      setMessage("Cita marcada como completada.");
+    } catch {
+      setStatus("error");
+      setMessage("No se pudo completar la cita.");
+    }
+  }
+
+  async function addDisputeEvidence(disputeId: number) {
+    if (!token) {
+      setMessage("Inicia sesion antes de aportar evidencia.");
+      return;
+    }
+
+    const note = window.prompt("Agrega una nota o evidencia textual para el arbitro.");
+    if (!note?.trim()) {
+      return;
+    }
+
+    setStatus("loading");
+    try {
+      const response = await fetch(`${API_URL}/disputes/${disputeId}/evidence/`, {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({ note: note.trim() }),
+      });
+      if (!response.ok) {
+        throw new Error("Dispute evidence request failed");
+      }
+      await loadWorkspace(token);
+      setStatus("success");
+      setMessage("Evidencia agregada a la disputa.");
+    } catch {
+      setStatus("error");
+      setMessage("No se pudo agregar la evidencia.");
+    }
+  }
+
   async function submitBid(auctionId: number) {
     if (!token) {
       setMessage("Inicia sesion antes de ofertar.");
@@ -309,6 +430,11 @@ export function TechnicianDashboard() {
   const isLoading = status === "loading";
   const scheduledLeads = leads.filter((lead) => lead.appointment !== null).length;
   const openAuctions = auctions.filter((auction) => auction.status === "open");
+  const activeDisputes = disputes.filter((dispute) => dispute.status !== "resolved");
+  const receivedRatings = ratings.filter((rating) => rating.target_role === "technician");
+  const averageRating = receivedRatings.length
+    ? (receivedRatings.reduce((total, rating) => total + rating.score, 0) / receivedRatings.length).toFixed(1)
+    : "0.0";
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-950 text-white">
@@ -349,7 +475,7 @@ export function TechnicianDashboard() {
           </div>
         </header>
 
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-4">
           <div className={`${surfaceClass} p-5`}>
             <p className="text-sm text-purple-200">Citas asignadas</p>
             <p className="mt-2 text-3xl font-bold">{scheduledLeads}</p>
@@ -359,8 +485,13 @@ export function TechnicianDashboard() {
             <p className="mt-2 text-3xl font-bold">{leads.length}</p>
           </div>
           <div className={`${surfaceClass} p-5`}>
-            <p className="text-sm text-purple-200">Servicios activos</p>
-            <p className="mt-2 text-3xl font-bold">{services.filter((service) => service.is_active).length}</p>
+            <p className="text-sm text-purple-200">Rating promedio</p>
+            <p className="mt-2 text-3xl font-bold">{averageRating}</p>
+            <p className="text-xs text-purple-200">{receivedRatings.length} reseñas</p>
+          </div>
+          <div className={`${surfaceClass} p-5`}>
+            <p className="text-sm text-purple-200">Disputas abiertas</p>
+            <p className="mt-2 text-3xl font-bold">{activeDisputes.length}</p>
           </div>
         </div>
 
@@ -575,7 +706,32 @@ export function TechnicianDashboard() {
                         <p className="mt-2 text-sm leading-6 text-purple-100">{appointment?.request_text || lead.message}</p>
                       </div>
 
-                      <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                      {appointment && ["pending", "confirmed", "rescheduled"].includes(appointment.status) ? (
+                        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                          {appointment.technician_status !== "on_the_way" && appointment.technician_status !== "arrived" ? (
+                            <Button
+                              size="sm"
+                              className="bg-gradient-to-r from-blue-500 to-indigo-600 font-semibold text-white hover:from-blue-600 hover:to-indigo-700"
+                              onClick={() => void notifyOnTheWay(appointment.id)}
+                              disabled={isLoading}
+                            >
+                              En camino
+                            </Button>
+                          ) : null}
+                          {appointment.technician_status === "on_the_way" ? (
+                            <Button
+                              size="sm"
+                              className="bg-gradient-to-r from-violet-500 to-purple-600 font-semibold text-white hover:from-violet-600 hover:to-purple-700"
+                              onClick={() => void notifyArrived(appointment.id)}
+                              disabled={isLoading}
+                            >
+                              He llegado
+                            </Button>
+                          ) : null}
+                        </div>
+                      ) : null}
+
+                      <div className="mt-2 grid gap-2 sm:grid-cols-4">
                         <Button
                           size="sm"
                           variant="ghost"
@@ -602,10 +758,89 @@ export function TechnicianDashboard() {
                         >
                           Cerrar lead
                         </Button>
+                        {appointment ? (
+                          <Button
+                            size="sm"
+                            className="bg-gradient-to-r from-emerald-400 to-teal-500 font-semibold text-white hover:from-emerald-500 hover:to-teal-600"
+                            onClick={() => void completeAppointment(appointment.id)}
+                            disabled={isLoading || appointment.status === "completed"}
+                          >
+                            Completar cita
+                          </Button>
+                        ) : null}
                       </div>
                     </div>
                   );
                 })
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className={`${surfaceClass} border-white/10 bg-white/5 text-white`}>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-3 text-white">
+              <span className="rounded-xl bg-white/10 p-2 text-orange-200">
+                <ClipboardList className="size-5" />
+              </span>
+              Disputas asociadas
+            </CardTitle>
+            <CardDescription className="text-purple-200">
+              Revisa reclamos abiertos por clientes y agrega tu version para el arbitro.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Separator className="mb-5 bg-white/10" />
+            <div className="grid gap-4">
+              {disputes.length === 0 ? (
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-5 text-center text-sm text-purple-100">
+                  No tienes disputas asociadas.
+                </div>
+              ) : (
+                disputes.map((dispute) => (
+                  <div key={dispute.id} className="rounded-2xl border border-white/10 bg-white/[0.07] p-5 shadow-lg">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.24em] text-orange-200">Disputa #{dispute.id}</p>
+                        <h3 className="mt-2 text-xl font-semibold text-white">{dispute.title}</h3>
+                        <p className="mt-2 text-sm leading-6 text-purple-100">{dispute.description}</p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Badge className="border-white/10 bg-white/10 text-purple-100 hover:bg-white/10">
+                          {disputeStatusLabel[dispute.status]}
+                        </Badge>
+                        <Badge className="border-white/10 bg-white/10 text-purple-100 hover:bg-white/10">
+                          {disputeDecisionLabel[dispute.decision]}
+                        </Badge>
+                      </div>
+                    </div>
+                    {dispute.ai_summary ? <p className="mt-3 text-sm text-purple-200">Resumen IA: {dispute.ai_summary}</p> : null}
+                    {dispute.arbiter_notes ? <p className="mt-3 text-sm text-orange-100">Decision arbitro: {dispute.arbiter_notes}</p> : null}
+                    <div className="mt-4 rounded-xl border border-white/10 bg-slate-950/20 p-4">
+                      <p className="text-sm font-medium text-white">Evidencia registrada</p>
+                      {dispute.evidence.length === 0 ? (
+                        <p className="mt-2 text-sm text-purple-200">Sin evidencia adicional.</p>
+                      ) : (
+                        <div className="mt-2 grid gap-2">
+                          {dispute.evidence.map((item) => (
+                            <p key={item.id} className="rounded-lg bg-white/5 p-2 text-sm text-purple-100">
+                              {item.note || "Archivo adjunto"}
+                            </p>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="mt-4 border border-white/10 text-purple-100 hover:bg-white/10 hover:text-white"
+                      disabled={isLoading || dispute.status === "resolved"}
+                      onClick={() => void addDisputeEvidence(dispute.id)}
+                    >
+                      Agregar evidencia
+                    </Button>
+                  </div>
+                ))
               )}
             </div>
           </CardContent>

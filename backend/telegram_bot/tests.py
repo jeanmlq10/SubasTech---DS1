@@ -6,7 +6,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from appointments.models import Appointment
-from auctions.models import Auction
+from auctions.models import Auction, Bid
 from audit.models import AuditEvent
 from catalog.models import Category, Service, TechnicianAvailability, TechnicianProfile, Zone
 from leads.models import ServiceLead
@@ -205,7 +205,7 @@ class TelegramBotTests(TestCase):
         self.assertEqual(auction_response.status_code, 200)
         self.assertEqual(auction_response.json()["step"], "initial")
         self.assertIn("Subasta creada", auction_response.json()["reply"])
-        self.assertIn("http://localhost:3000/login?telegram_chat_id=101", auction_response.json()["reply"])
+        self.assertIn("Te avisare por Telegram", auction_response.json()["reply"])
         self.assertEqual(Auction.objects.count(), 1)
         self.assertEqual(Appointment.objects.count(), 0)
         self.assertEqual(ServiceLead.objects.count(), 0)
@@ -215,6 +215,64 @@ class TelegramBotTests(TestCase):
         self.assertEqual(auction.zone, self.zone)
         self.assertEqual(auction.source, Auction.Source.TELEGRAM)
         self.assertEqual(auction.metadata["chat_id"], 101)
+
+    def test_client_accepts_telegram_auction_bid_by_technician_name(self):
+        auction = Auction.objects.create(
+            client=self.user,
+            category=self.category,
+            zone=self.zone,
+            title="Solicitud de Electricista",
+            description="Necesito un electricista urgente en Riomar",
+            location="Riomar",
+            source=Auction.Source.TELEGRAM,
+            metadata={"chat_id": 101},
+        )
+        start = self._aware_datetime(self.available_date, 9)
+        bid = Bid.objects.create(
+            auction=auction,
+            technician=self.profile,
+            service=self.service,
+            amount=85000,
+            message="Puedo atender en la manana.",
+            estimated_minutes=60,
+            available_from=start,
+        )
+
+        response = self._send_message("ACEPTO: Carlos Mendoza")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["step"], "initial")
+        self.assertIn("Oferta aceptada y cita creada", response.json()["reply"])
+        auction.refresh_from_db()
+        bid.refresh_from_db()
+        self.assertEqual(auction.status, Auction.Status.AWARDED)
+        self.assertEqual(auction.winning_bid, bid)
+        self.assertEqual(bid.status, Bid.Status.ACCEPTED)
+        appointment = Appointment.objects.select_related("lead").get()
+        self.assertEqual(appointment.client, self.user)
+        self.assertEqual(appointment.technician, self.profile)
+        self.assertEqual(appointment.status, Appointment.Status.CONFIRMED)
+        self.assertEqual(appointment.metadata["source"], "telegram.auction_acceptance")
+        self.assertEqual(appointment.lead.source, ServiceLead.Source.TELEGRAM)
+
+    def test_accepting_unknown_technician_keeps_telegram_auction_open(self):
+        auction = Auction.objects.create(
+            client=self.user,
+            category=self.category,
+            zone=self.zone,
+            title="Solicitud de Electricista",
+            description="Necesito un electricista urgente en Riomar",
+            source=Auction.Source.TELEGRAM,
+            metadata={"chat_id": 101},
+        )
+
+        response = self._send_message("ACEPTO: Tecnico Inexistente")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("No encontre una oferta pendiente", response.json()["reply"])
+        auction.refresh_from_db()
+        self.assertEqual(auction.status, Auction.Status.OPEN)
+        self.assertEqual(Appointment.objects.count(), 0)
 
     def test_link_user_claims_anonymous_telegram_auction(self):
         first_response = self._send_webhook_message("Necesito un electricista en Riomar", chat_id=404)

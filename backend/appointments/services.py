@@ -295,6 +295,7 @@ def create_appointment(
     status: str = Appointment.Status.CONFIRMED,
     metadata: dict | None = None,
     actor=None,
+    skip_availability_check: bool = False,
 ) -> Appointment:
     """Create an appointment after enforcing availability and conflict checks.
 
@@ -327,7 +328,7 @@ def create_appointment(
     with transaction.atomic():
         locked_technician = _lock_technician(technician.pk)
 
-        if not is_within_availability(
+        if not skip_availability_check and not is_within_availability(
             locked_technician, scheduled_start, scheduled_end
         ):
             raise ValidationError(

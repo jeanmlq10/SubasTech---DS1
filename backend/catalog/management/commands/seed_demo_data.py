@@ -3,289 +3,140 @@ from datetime import time
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.core.management.base import BaseCommand
+from django.db.models import Q
 
+from appointments.models import Appointment
+from auctions.models import Auction
 from catalog.models import Category, Service, TechnicianAvailability, TechnicianProfile, Zone
 from disputes.models import Dispute
 from leads.models import ServiceLead
-from reputation.models import Rating
+from notifications.models import Notification
+from reputation.models import Penalty, Rating
+from telegram_bot.models import ChatSession
+
 
 DEMO_PASSWORD = "Subastech123!"
 
-USERS = [
+CORE_USERS = [
     {"username": "demo_admin", "role": "admin", "email": "admin@subastech.demo", "first_name": "Admin", "last_name": "SubasTech"},
     {"username": "demo_arbiter", "role": "arbiter", "email": "arbiter@subastech.demo", "first_name": "Arbiter", "last_name": "SubasTech"},
     {"username": "demo_client", "role": "client", "email": "client@subastech.demo", "first_name": "Camila", "last_name": "Cliente", "phone_number": "573001112233"},
-    # Electricistas
-    {"username": "tech_carlos", "role": "technician", "email": "carlos@subastech.demo", "first_name": "Carlos", "last_name": "Mendoza", "phone_number": "573002223344"},
-    {"username": "tech_ana", "role": "technician", "email": "ana@subastech.demo", "first_name": "Ana", "last_name": "Torres", "phone_number": "573002223345"},
-    {"username": "tech_roberto", "role": "technician", "email": "roberto@subastech.demo", "first_name": "Roberto", "last_name": "Silva", "phone_number": "573002223346"},
-    # Plomeros
-    {"username": "tech_maria", "role": "technician", "email": "maria@subastech.demo", "first_name": "Maria", "last_name": "Gonzalez", "phone_number": "573003334455"},
-    {"username": "tech_pedro", "role": "technician", "email": "pedro@subastech.demo", "first_name": "Pedro", "last_name": "Ramirez", "phone_number": "573003334456"},
-    {"username": "tech_lucia", "role": "technician", "email": "lucia@subastech.demo", "first_name": "Lucia", "last_name": "Herrera", "phone_number": "573003334457"},
-    # Cerrajeros
-    {"username": "tech_jorge", "role": "technician", "email": "jorge@subastech.demo", "first_name": "Jorge", "last_name": "Castro", "phone_number": "573004445566"},
-    {"username": "tech_sofia", "role": "technician", "email": "sofia@subastech.demo", "first_name": "Sofia", "last_name": "Mendez", "phone_number": "573004445567"},
-    {"username": "tech_andres", "role": "technician", "email": "andres@subastech.demo", "first_name": "Andres", "last_name": "Vargas", "phone_number": "573004445568"},
-    # Mantenimiento general
-    {"username": "tech_valentina", "role": "technician", "email": "valentina@subastech.demo", "first_name": "Valentina", "last_name": "Rios", "phone_number": "573005556677"},
-    {"username": "tech_diego", "role": "technician", "email": "diego@subastech.demo", "first_name": "Diego", "last_name": "Morales", "phone_number": "573005556678"},
-    {"username": "tech_camila", "role": "technician", "email": "camila@subastech.demo", "first_name": "Camila", "last_name": "Ortiz", "phone_number": "573005556679"},
-    # Cobertura demo por localidad
-    {"username": "tech_natalia", "role": "technician", "email": "natalia@subastech.demo", "first_name": "Natalia", "last_name": "Mejia", "phone_number": "573005556680"},
-    {"username": "tech_felipe", "role": "technician", "email": "felipe@subastech.demo", "first_name": "Felipe", "last_name": "Ruiz", "phone_number": "573005556681"},
-    {"username": "tech_oscar", "role": "technician", "email": "oscar@subastech.demo", "first_name": "Oscar", "last_name": "Acosta", "phone_number": "573005556682"},
-    {"username": "tech_paola", "role": "technician", "email": "paola@subastech.demo", "first_name": "Paola", "last_name": "Suarez", "phone_number": "573005556683"},
 ]
 
-TECHNICIANS = {
-    # Riomar
-    "tech_carlos": {
-        "bio": "Electricista residencial con experiencia en urgencias, tableros y tomacorrientes.",
-        "category": "electrician",
-        "service": "Electricista urgente residencial",
-        "description": "Diagnostico y reparacion de fallas electricas, breakers, tomacorrientes y cortos.",
-        "base_price": 85000,
-        "zones": ["barranquilla-riomar"],
-        "response_time_minutes": 15,
-        "service_completion_rate": 96,
-        "rating": 5,
-    },
-    "tech_roberto": {
-        "bio": "Electricista con experiencia en mantenimiento industrial y atencion de contingencias.",
-        "category": "electrician",
-        "service": "Electricista industrial",
-        "description": "Mantenimiento y reparacion de sistemas electricos de mayor carga.",
-        "base_price": 110000,
-        "zones": ["barranquilla-villa-santos"],
-        "response_time_minutes": 30,
-        "service_completion_rate": 98,
-        "rating": 5,
-    },
-    "tech_jorge": {
-        "bio": "Cerrajero especialista en cerraduras de seguridad y automatizacion.",
-        "category": "locksmith",
-        "service": "Cerraduras de seguridad",
-        "description": "Instalacion y reparacion de cerraduras, llaves y sistemas de acceso.",
-        "base_price": 75000,
-        "zones": ["barranquilla-riomar"],
-        "response_time_minutes": 15,
-        "service_completion_rate": 95,
-        "rating": 5,
-    },
-    "tech_valentina": {
-        "bio": "Tecnica de mantenimiento general con experiencia en reparaciones varias.",
-        "category": "general-handyman",
-        "service": "Mantenimiento general residencial",
-        "description": "Reparaciones varias, montajes, mantenimiento preventivo y pequenos arreglos.",
-        "base_price": 60000,
-        "zones": ["barranquilla-riomar"],
-        "response_time_minutes": 30,
-        "service_completion_rate": 90,
-        "rating": 4,
-    },
-    # Norte Centro Historico
-    "tech_ana": {
-        "bio": "Especialista en instalaciones electricas residenciales y comerciales.",
-        "category": "electrician",
-        "service": "Instalacion electrica comercial",
-        "description": "Instalaciones, reparaciones y revision de sistemas electricos.",
-        "base_price": 95000,
-        "zones": ["barranquilla-alto-prado"],
-        "response_time_minutes": 20,
-        "service_completion_rate": 94,
-        "rating": 5,
-    },
-    "tech_pedro": {
-        "bio": "Tecnico en plomeria sanitaria y sistemas de agua caliente.",
-        "category": "plumber",
-        "service": "Agua caliente y calefaccion",
-        "description": "Instalacion y reparacion de sistemas de agua caliente y calefaccion.",
-        "base_price": 90000,
-        "zones": ["barranquilla-alto-prado"],
-        "response_time_minutes": 25,
-        "service_completion_rate": 89,
-        "rating": 4,
-    },
-    "tech_sofia": {
-        "bio": "Cerrajera con experiencia en cerraduras inteligentes y acceso biometrico.",
-        "category": "locksmith",
-        "service": "Cerraduras inteligentes",
-        "description": "Instalacion de cerraduras inteligentes, biometricas y sistemas modernos.",
-        "base_price": 120000,
-        "zones": ["barranquilla-alto-prado"],
-        "response_time_minutes": 25,
-        "service_completion_rate": 97,
-        "rating": 5,
-    },
-    "tech_diego": {
-        "bio": "Tecnico mantenedor especializado en reparaciones de inmuebles.",
-        "category": "general-handyman",
-        "service": "Reparaciones y mantenimiento",
-        "description": "Reparaciones estructurales, pintura, carpinteria y mantenimiento general.",
-        "base_price": 70000,
-        "zones": ["barranquilla-el-prado"],
-        "response_time_minutes": 35,
-        "service_completion_rate": 88,
-        "rating": 4,
-    },
-    # Metropolitana
-    "tech_maria": {
-        "bio": "Plomera especializada en fugas, destapes y reparaciones de tuberias.",
-        "category": "plumber",
-        "service": "Plomeria y fugas residenciales",
-        "description": "Atencion de fugas, destapes, banos, lavaplatos y reparaciones de tuberia.",
-        "base_price": 70000,
-        "zones": ["barranquilla-buenos-aires"],
-        "response_time_minutes": 20,
-        "service_completion_rate": 92,
-        "rating": 4,
-    },
-    "tech_natalia": {
-        "bio": "Tecnica de linea blanca con experiencia en diagnostico y reparacion en sitio.",
-        "category": "appliance-repair",
-        "service": "Reparacion de electrodomesticos",
-        "description": "Revision y reparacion de neveras, lavadoras, estufas y pequenos electrodomesticos.",
-        "base_price": 90000,
-        "zones": ["barranquilla-buenos-aires"],
-        "response_time_minutes": 25,
-        "service_completion_rate": 93,
-        "rating": 5,
-    },
-    # Suroriente
-    "tech_lucia": {
-        "bio": "Plomera experta en sistemas de drenaje y tratamiento de agua.",
-        "category": "plumber",
-        "service": "Sistemas de drenaje",
-        "description": "Diseno e instalacion de sistemas de drenaje y tratamiento de aguas.",
-        "base_price": 100000,
-        "zones": ["barranquilla-la-luz"],
-        "response_time_minutes": 30,
-        "service_completion_rate": 91,
-        "rating": 4,
-    },
-    "tech_felipe": {
-        "bio": "Tecnico HVAC especializado en mantenimiento e instalacion de aire acondicionado.",
-        "category": "hvac-technician",
-        "service": "Aire acondicionado residencial",
-        "description": "Mantenimiento preventivo, limpieza profunda y diagnostico de equipos de aire acondicionado.",
-        "base_price": 105000,
-        "zones": ["barranquilla-la-luz"],
-        "response_time_minutes": 35,
-        "service_completion_rate": 92,
-        "rating": 5,
-    },
-    # Suroccidente
-    "tech_andres": {
-        "bio": "Cerrajero urgente disponible para emergencias de cerraduras.",
-        "category": "locksmith",
-        "service": "Cerrajeria urgente 24/7",
-        "description": "Servicio de emergencia para cerraduras, puertas atascadas y llaves perdidas.",
-        "base_price": 85000,
-        "zones": ["barranquilla-la-pradera"],
-        "response_time_minutes": 10,
-        "service_completion_rate": 100,
-        "rating": 5,
-    },
-    "tech_oscar": {
-        "bio": "Maestro de obra y mantenimiento con experiencia en arreglos del hogar por demanda.",
-        "category": "general-handyman",
-        "service": "Mantenimiento locativo express",
-        "description": "Ajustes locativos, resanes, pintura puntual y reparaciones varias en vivienda.",
-        "base_price": 68000,
-        "zones": ["barranquilla-la-pradera"],
-        "response_time_minutes": 30,
-        "service_completion_rate": 89,
-        "rating": 4,
-    },
-    # Soledad
-    "tech_camila": {
-        "bio": "Tecnica de multiservicios para carpinteria, pintura y reparaciones variadas.",
-        "category": "general-handyman",
-        "service": "Multiservicios del hogar",
-        "description": "Carpinteria, pintura, cortinas, estanterias y reparaciones de multiples tipos.",
-        "base_price": 75000,
-        "zones": ["soledad"],
-        "response_time_minutes": 40,
-        "service_completion_rate": 86,
-        "rating": 4,
-    },
-    "tech_paola": {
-        "bio": "Plomera residencial para fugas, griferia y mantenimientos preventivos en Soledad.",
-        "category": "plumber",
-        "service": "Plomeria residencial Soledad",
-        "description": "Atencion de fugas, cambios de griferia, sanitarios y reparaciones hidraulicas.",
-        "base_price": 72000,
-        "zones": ["soledad"],
-        "response_time_minutes": 20,
-        "service_completion_rate": 94,
-        "rating": 5,
-    },
+TECHNICIAN_SPECS = [
+    # Riomar: multiple direct options for Telegram recommendations.
+    ("tech_carlos", "Carlos", "Mendoza", "electrician", "Electricista urgente residencial", "Urgencias electricas, breakers, tomacorrientes y cortos.", 85000, ["barranquilla-riomar"], 15),
+    ("tech_daniel", "Daniel", "Ariza", "electrician", "Electricista residencial Riomar", "Instalaciones, diagnostico y reparacion electrica en vivienda.", 78000, ["barranquilla-riomar"], 20),
+    ("tech_lina", "Lina", "Caballero", "electrician", "Revision electrica express", "Revision de tableros, puntos electricos y fallas intermitentes.", 82000, ["barranquilla-riomar"], 25),
+    ("tech_jorge", "Jorge", "Castro", "locksmith", "Cerrajeria Riomar", "Apertura de puertas, cambio de guardas y cerraduras de seguridad.", 75000, ["barranquilla-riomar"], 18),
+    ("tech_valentina", "Valentina", "Rios", "general-handyman", "Mantenimiento general Riomar", "Reparaciones locativas, instalaciones menores y mantenimiento preventivo.", 65000, ["barranquilla-riomar"], 30),
+    ("tech_maria", "Maria", "Gonzalez", "plumber", "Plomeria Riomar", "Fugas, griferia, sanitarios y tuberias residenciales.", 72000, ["barranquilla-riomar"], 22),
+    # Boston: at least two technicians in the same zone, including locksmith.
+    ("tech_boston_ana", "Ana", "Torres", "electrician", "Electricista Boston", "Revision de cortos, acometidas internas y mantenimiento electrico.", 76000, ["barranquilla-boston"], 25),
+    ("tech_boston_pedro", "Pedro", "Ramirez", "plumber", "Plomeria Boston", "Destapes, fugas y reparaciones hidraulicas en apartamentos.", 69000, ["barranquilla-boston"], 20),
+    ("tech_boston_sofia", "Sofia", "Mendez", "locksmith", "Cerrajeria Boston", "Cerrajeria residencial, puertas trabadas y llaves perdidas.", 70000, ["barranquilla-boston"], 15),
+    ("tech_boston_diego", "Diego", "Morales", "general-handyman", "Mantenimiento Boston", "Arreglos pequenos, montaje de accesorios y pintura puntual.", 64000, ["barranquilla-boston"], 35),
+    # Villa Santos.
+    ("tech_roberto", "Roberto", "Silva", "electrician", "Electricista industrial y residencial", "Mantenimiento electrico de media carga y reparaciones urgentes.", 110000, ["barranquilla-villa-santos"], 30),
+    ("tech_villa_paula", "Paula", "Mejia", "electrician", "Instalaciones electricas Villa Santos", "Instalacion de luminarias, puntos electricos y tableros.", 90000, ["barranquilla-villa-santos"], 28),
+    ("tech_villa_lucia", "Lucia", "Herrera", "plumber", "Plomeria Villa Santos", "Reparacion de fugas, lavaplatos, banos y tuberias.", 76000, ["barranquilla-villa-santos"], 24),
+    ("tech_villa_oscar", "Oscar", "Acosta", "general-handyman", "Mantenimiento residencial Villa Santos", "Reparaciones generales, soportes, pintura y resanes.", 68000, ["barranquilla-villa-santos"], 32),
+    # Prado and Alto Prado.
+    ("tech_alto_ana", "Ana Maria", "Santos", "electrician", "Electricista Alto Prado", "Instalaciones comerciales y residenciales certificadas.", 95000, ["barranquilla-alto-prado"], 20),
+    ("tech_alto_pedro", "Pedro Luis", "Navas", "plumber", "Agua caliente y plomeria Alto Prado", "Sistemas de agua caliente, griferia y reparaciones sanitarias.", 90000, ["barranquilla-alto-prado"], 25),
+    ("tech_alto_sofia", "Sofia", "Herrera", "locksmith", "Cerraduras inteligentes Alto Prado", "Instalacion de cerraduras digitales y sistemas de acceso.", 120000, ["barranquilla-alto-prado"], 25),
+    ("tech_alto_felipe", "Felipe", "Ruiz", "hvac-technician", "Aire acondicionado Alto Prado", "Mantenimiento preventivo y diagnostico de aire acondicionado.", 105000, ["barranquilla-alto-prado"], 35),
+    ("tech_prado_diego", "Diego", "Morales", "general-handyman", "Reparaciones El Prado", "Carpinteria menor, pintura y mantenimiento locativo.", 70000, ["barranquilla-el-prado"], 35),
+    ("tech_prado_camila", "Camila", "Ortiz", "appliance-repair", "Electrodomesticos El Prado", "Revision de lavadoras, neveras, estufas y linea blanca.", 92000, ["barranquilla-el-prado"], 28),
+    ("tech_prado_andres", "Andres", "Vargas", "locksmith", "Cerrajero El Prado", "Apertura, cambio de cilindros y mantenimiento de cerraduras.", 73000, ["barranquilla-el-prado"], 18),
+    # Rebolo and surrounding south-east tests.
+    ("tech_rebolo_andres", "Andres", "Perez", "locksmith", "Cerrajeria urgente Rebolo", "Emergencias de cerraduras, puertas atascadas y cambios de llave.", 68000, ["barranquilla-rebolo"], 12),
+    ("tech_rebolo_julian", "Julian", "Marin", "locksmith", "Cerraduras de seguridad Rebolo", "Instalacion de cerraduras, chapas y refuerzos de seguridad.", 72000, ["barranquilla-rebolo"], 18),
+    ("tech_rebolo_lucia", "Lucia", "Fuentes", "plumber", "Plomeria Rebolo", "Fugas visibles, destapes, sanitarios y reparaciones hidraulicas.", 65000, ["barranquilla-rebolo"], 20),
+    ("tech_rebolo_nestor", "Nestor", "Diaz", "electrician", "Electricista Rebolo", "Cortos, puntos electricos, acometidas internas y revisiones.", 70000, ["barranquilla-rebolo"], 22),
+    # La Pradera.
+    ("tech_pradera_oscar", "Oscar", "Acosta", "general-handyman", "Mantenimiento locativo La Pradera", "Ajustes locativos, resanes y reparaciones varias en vivienda.", 68000, ["barranquilla-la-pradera"], 30),
+    ("tech_pradera_elena", "Elena", "Pardo", "plumber", "Plomeria La Pradera", "Cambios de griferia, fugas y revision de banos.", 69000, ["barranquilla-la-pradera"], 25),
+    ("tech_pradera_mateo", "Mateo", "Cortes", "electrician", "Electricista La Pradera", "Revision electrica residencial y cambios de accesorios.", 72000, ["barranquilla-la-pradera"], 26),
+    ("tech_pradera_natalia", "Natalia", "Mejia", "appliance-repair", "Electrodomesticos La Pradera", "Diagnostico y reparacion de lavadoras y neveras.", 85000, ["barranquilla-la-pradera"], 32),
+    # Buenos Aires and La Luz.
+    ("tech_baires_natalia", "Natalia", "Mejia", "appliance-repair", "Reparacion de electrodomesticos Buenos Aires", "Neveras, lavadoras, estufas y diagnostico en sitio.", 90000, ["barranquilla-buenos-aires"], 25),
+    ("tech_baires_mario", "Mario", "Lopez", "plumber", "Plomeria Buenos Aires", "Fugas, destapes y reparaciones hidraulicas residenciales.", 70000, ["barranquilla-buenos-aires"], 20),
+    ("tech_baires_ivan", "Ivan", "Salcedo", "electrician", "Electricista Buenos Aires", "Instalaciones y reparaciones electricas en casa.", 76000, ["barranquilla-buenos-aires"], 24),
+    ("tech_laluz_felipe", "Felipe", "Ruiz", "hvac-technician", "Aire acondicionado La Luz", "Limpieza, mantenimiento y diagnostico de minisplits.", 105000, ["barranquilla-la-luz"], 35),
+    ("tech_laluz_paola", "Paola", "Suarez", "plumber", "Plomeria La Luz", "Reparaciones hidraulicas, sanitarios y tuberias.", 72000, ["barranquilla-la-luz"], 20),
+    ("tech_laluz_jorge", "Jorge", "Escobar", "general-handyman", "Mantenimiento La Luz", "Instalaciones menores y reparaciones generales.", 62000, ["barranquilla-la-luz"], 34),
+    # Soledad.
+    ("tech_soledad_camila", "Camila", "Ortiz", "general-handyman", "Multiservicios Soledad", "Carpinteria, pintura, cortinas y reparaciones del hogar.", 75000, ["soledad"], 40),
+    ("tech_soledad_paola", "Paola", "Suarez", "plumber", "Plomeria residencial Soledad", "Fugas, griferia, sanitarios y mantenimientos preventivos.", 72000, ["soledad"], 20),
+    ("tech_soledad_rafael", "Rafael", "Mora", "electrician", "Electricista Soledad", "Cortos, breakers, puntos electricos y luminarias.", 76000, ["soledad"], 28),
+    ("tech_soledad_sara", "Sara", "Leon", "locksmith", "Cerrajeria Soledad", "Aperturas, cambios de guardas y cerraduras residenciales.", 68000, ["soledad"], 18),
+]
+
+TRADE_BY_CATEGORY = {
+    "electrician": "electrician",
+    "plumber": "plumber",
+    "locksmith": "locksmith",
+    "general-handyman": "general-handyman",
+    "appliance-repair": "general-handyman",
+    "hvac-technician": "general-handyman",
 }
 
-AVAILABILITIES = {
-    "tech_carlos": [
-        {"weekday": 1, "start_time": time(9, 0), "end_time": time(12, 0)},
-    ],
-    "tech_ana": [
-        {"weekday": 1, "start_time": time(14, 0), "end_time": time(18, 0)},
-    ],
-    "tech_roberto": [
-        {"weekday": 2, "start_time": time(9, 0), "end_time": time(12, 0)},
-    ],
-    "tech_maria": [
-        {"weekday": 2, "start_time": time(14, 0), "end_time": time(18, 0)},
-    ],
-    "tech_pedro": [
-        {"weekday": 2, "start_time": time(10, 0), "end_time": time(13, 0)},
-    ],
-    "tech_lucia": [
-        {"weekday": 3, "start_time": time(14, 0), "end_time": time(18, 0)},
-    ],
-    "tech_jorge": [
-        {"weekday": 3, "start_time": time(9, 0), "end_time": time(12, 0)},
-    ],
-    "tech_sofia": [
-        {"weekday": 3, "start_time": time(8, 0), "end_time": time(11, 0)},
-    ],
-    "tech_andres": [
-        {"weekday": 4, "start_time": time(14, 0), "end_time": time(18, 0)},
-    ],
-    "tech_valentina": [
-        {"weekday": 4, "start_time": time(9, 0), "end_time": time(12, 0)},
-    ],
-    "tech_camila": [
-        {"weekday": 4, "start_time": time(9, 0), "end_time": time(12, 0)},
-    ],
-    "tech_diego": [
-        {"weekday": 5, "start_time": time(9, 0), "end_time": time(12, 0)},
-    ],
-    "tech_natalia": [
-        {"weekday": 5, "start_time": time(14, 0), "end_time": time(18, 0)},
-    ],
-    "tech_felipe": [
-        {"weekday": 6, "start_time": time(9, 0), "end_time": time(12, 0)},
-    ],
-    "tech_oscar": [
-        {"weekday": 6, "start_time": time(14, 0), "end_time": time(18, 0)},
-    ],
-    "tech_paola": [
-        {"weekday": 7, "start_time": time(9, 0), "end_time": time(12, 0)},
-    ],
-}
+USERS = CORE_USERS + [
+    {
+        "username": username,
+        "role": "technician",
+        "email": f"{username}@subastech.demo",
+        "first_name": first_name,
+        "last_name": last_name,
+        "phone_number": f"57310{index:06d}",
+        "technician_trade": TRADE_BY_CATEGORY[category],
+    }
+    for index, (username, first_name, last_name, category, *_rest) in enumerate(TECHNICIAN_SPECS, start=200001)
+]
+
+
+def build_technicians() -> dict:
+    technicians = {}
+    for username, _first_name, _last_name, category, service, description, base_price, zones, response_minutes in TECHNICIAN_SPECS:
+        technicians[username] = {
+            "bio": f"{service}. Atencion demo para pruebas de SubasTech.",
+            "category": category,
+            "service": service,
+            "description": description,
+            "base_price": base_price,
+            "zones": zones,
+            "response_time_minutes": response_minutes,
+        }
+    return technicians
+
+
+TECHNICIANS = build_technicians()
+
+
+def build_availabilities() -> dict:
+    availabilities = {}
+    for index, (username, *_rest) in enumerate(TECHNICIAN_SPECS):
+        weekday = (index % 7) + 1
+        start_hour = 8 + (index % 5)
+        availabilities[username] = [
+            {"weekday": weekday, "start_time": time(start_hour, 0), "end_time": time(start_hour + 4, 0)}
+        ]
+    return availabilities
+
+
+AVAILABILITIES = build_availabilities()
 
 
 class Command(BaseCommand):
-    help = "Seed demo users and data for presenting SubasTech end-to-end."
+    help = "Seed clean demo users, technicians and services for SubasTech manual testing."
 
     def handle(self, *args, **options):
         call_command("seed_initial_data")
         user_model = get_user_model()
         users = self._seed_users(user_model)
-        services = self._seed_technicians(users)
-        self._seed_ratings(users, services)
-        self._seed_leads(users, services)
-        self._seed_disputes(users, services)
+        self._clear_demo_activity(users)
+        self._seed_technicians(users)
         self._print_credentials()
 
     def _seed_users(self, user_model):
@@ -297,18 +148,30 @@ class Command(BaseCommand):
                 "first_name": data["first_name"],
                 "last_name": data["last_name"],
                 "phone_number": data.get("phone_number", ""),
+                "technician_trade": data.get("technician_trade", ""),
                 "is_active": True,
+                "is_staff": data["role"] in {"admin", "arbiter"},
             }
-            if data["role"] == "admin":
-                defaults["is_staff"] = True
             user, _created = user_model.objects.update_or_create(username=data["username"], defaults=defaults)
             user.set_password(DEMO_PASSWORD)
             user.save()
             users[data["username"]] = user
         return users
 
+    def _clear_demo_activity(self, users):
+        demo_users = list(users.values())
+        demo_profiles = TechnicianProfile.objects.filter(user__in=demo_users)
+
+        Appointment.objects.filter(Q(client__in=demo_users) | Q(technician__in=demo_profiles)).delete()
+        ServiceLead.objects.filter(Q(client_user__in=demo_users) | Q(technician__in=demo_profiles)).delete()
+        Dispute.objects.filter(Q(client__in=demo_users) | Q(technician__in=demo_profiles)).delete()
+        Auction.objects.filter(client__in=demo_users).delete()
+        Rating.objects.filter(Q(author__in=demo_users) | Q(client__in=demo_users) | Q(technician__in=demo_profiles)).delete()
+        Penalty.objects.filter(technician__in=demo_profiles).delete()
+        Notification.objects.filter(user__in=demo_users).delete()
+        ChatSession.objects.filter(user__in=demo_users).delete()
+
     def _seed_technicians(self, users):
-        services = {}
         for username, data in TECHNICIANS.items():
             profile, _created = TechnicianProfile.objects.update_or_create(
                 user=users[username],
@@ -317,13 +180,13 @@ class Command(BaseCommand):
                     "is_verified": True,
                     "availability_status": TechnicianProfile.AvailabilityStatus.AVAILABLE,
                     "response_time_minutes": data["response_time_minutes"],
-                    "completed_services": 24,
-                    "service_completion_rate": data["service_completion_rate"],
+                    "completed_services": 0,
+                    "service_completion_rate": 0,
                 },
             )
             profile.zones.set(Zone.objects.filter(slug__in=data["zones"]))
             category = Category.objects.get(slug=data["category"])
-            service, _created = Service.objects.update_or_create(
+            Service.objects.update_or_create(
                 technician=profile,
                 title=data["service"],
                 defaults={
@@ -333,73 +196,23 @@ class Command(BaseCommand):
                     "is_active": True,
                 },
             )
-            for availability in AVAILABILITIES.get(username, []):
-                TechnicianAvailability.objects.update_or_create(
-                    technician=profile,
-                    weekday=availability["weekday"],
-                    start_time=availability["start_time"],
-                    end_time=availability["end_time"],
-                    defaults={"is_active": True},
-                )
-            services[username] = service
-        return services
+            self._seed_availability(profile, username)
 
-    def _seed_ratings(self, users, services):
-        client = users["demo_client"]
-        for username, service in services.items():
-            score = TECHNICIANS[username]["rating"]
-            Rating.objects.update_or_create(
-                author=client,
-                technician=service.technician,
-                service=service,
-                target_role=Rating.TargetRole.TECHNICIAN,
-                defaults={"score": score, "comment": "Servicio demo para presentacion SubasTech."},
+    def _seed_availability(self, profile, username):
+        TechnicianAvailability.objects.filter(technician=profile).delete()
+        for availability in AVAILABILITIES.get(username, []):
+            TechnicianAvailability.objects.create(
+                technician=profile,
+                weekday=availability["weekday"],
+                start_time=availability["start_time"],
+                end_time=availability["end_time"],
+                is_active=True,
             )
-
-    def _seed_leads(self, users, services):
-        lead_data = [
-            ("tech_carlos", "573001112233", "Necesito un electricista urgente en Riomar", "electrician", "Riomar", "high"),
-            ("tech_ana", "573005556677", "Necesito revisar un corto en Alto Prado", "electrician", "Alto Prado", "high"),
-            ("tech_natalia", "573006667788", "La nevera dejo de enfriar en Buenos Aires", "appliance-repair", "Buenos Aires", "normal"),
-            ("tech_felipe", "573007778899", "Necesito mantenimiento del aire en La Luz", "hvac-technician", "La Luz", "normal"),
-            ("tech_oscar", "573008889900", "Busco mantenimiento locativo en La Pradera", "general-handyman", "La Pradera", "normal"),
-            ("tech_paola", "573009990011", "Tengo una fuga de agua en Soledad", "plumber", "Soledad", "high"),
-        ]
-        for username, phone, message, category, location, urgency in lead_data:
-            service = services[username]
-            ServiceLead.objects.update_or_create(
-                technician=service.technician,
-                service=service,
-                client_phone=phone,
-                message=message,
-                defaults={
-                    "client_user": users["demo_client"] if phone == users["demo_client"].phone_number else None,
-                    "client_name": "Cliente demo",
-                    "category": category,
-                    "location": location,
-                    "urgency": urgency,
-                    "status": ServiceLead.Status.NEW,
-                    "metadata": {"demo": True},
-                },
-            )
-
-    def _seed_disputes(self, users, services):
-        Dispute.objects.update_or_create(
-            client=users["demo_client"],
-            technician=services["tech_valentina"].technician,
-            service=services["tech_valentina"],
-            title="Servicio incompleto en mantenimiento",
-            defaults={
-                "description": "El mantenimiento fue incompleto y quedo pendiente la pintura de la sala.",
-                "ai_summary": "Cliente reporta que el servicio de mantenimiento quedo incompleto.",
-                "priority": "high",
-                "status": Dispute.Status.OPEN,
-                "decision": Dispute.Decision.PENDING,
-            },
-        )
 
     def _print_credentials(self):
-        self.stdout.write(self.style.SUCCESS("Demo data ready."))
+        self.stdout.write(self.style.SUCCESS("Clean demo data ready."))
         self.stdout.write("Password for all demo users: Subastech123!")
+        self.stdout.write("Transactional demo data reset: auctions=0, bids=0, leads=0, appointments=0, disputes=0, ratings=0.")
+        self.stdout.write(f"Technicians seeded: {len(TECHNICIANS)}")
         for data in USERS:
             self.stdout.write(f"- {data['username']} ({data['role']})")

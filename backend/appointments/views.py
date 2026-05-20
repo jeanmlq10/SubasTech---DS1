@@ -11,6 +11,9 @@ The viewset follows the conventions of :class:`disputes.views.DisputeViewSet`
 transitions) and :class:`leads.views.TechnicianLeadViewSet` (single-word
 action calling a service helper and returning the serialized object).
 """
+import logging
+
+from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -28,6 +31,10 @@ from rest_framework.views import APIView
 from accounts.models import User
 from accounts.permissions import IsPlatformAdmin
 from catalog.models import TechnicianProfile
+from notifications.services import build_telegram_message_payload
+from telegram_bot.client import TelegramBotClient
+
+logger = logging.getLogger(__name__)
 
 from .models import Appointment
 from .permissions import IsAppointmentParticipantOrAdmin
@@ -100,8 +107,11 @@ class AppointmentViewSet(viewsets.ModelViewSet):
             "retrieve",
             "cancel",
             "reschedule",
+            "confirm_complete",
             "complete",
             "no_show",
+            "on_the_way",
+            "arrived",
         }:
             return [IsAuthenticated(), IsAppointmentParticipantOrAdmin()]
         return [IsAuthenticated()]
@@ -182,10 +192,65 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         return self._render(updated)
 
     @action(detail=True, methods=["post"])
+    def on_the_way(self, request, pk=None):
+        appointment = self.get_object()
+        self._require_technician_actor(request.user, appointment)
+        if appointment.status not in Appointment.ACTIVE_STATUSES:
+            raise DRFValidationError({"status": "Appointment is not active."})
+        metadata = dict(appointment.metadata or {})
+        metadata["technician_status"] = "on_the_way"
+        appointment.metadata = metadata
+        appointment.save(update_fields=["metadata", "updated_at"])
+        technician_name = appointment.technician.user.get_full_name() or appointment.technician.user.username
+        address = metadata.get("client_address") or ""
+        address_suffix = f" a {address}" if address else ""
+        _send_client_telegram(
+            appointment,
+            f"Tu tecnico {technician_name} esta en camino{address_suffix}.\nPronto llegara.",
+        )
+        return self._render(appointment)
+
+    @action(detail=True, methods=["post"])
+    def arrived(self, request, pk=None):
+        appointment = self.get_object()
+        self._require_technician_actor(request.user, appointment)
+        if appointment.status not in Appointment.ACTIVE_STATUSES:
+            raise DRFValidationError({"status": "Appointment is not active."})
+        metadata = dict(appointment.metadata or {})
+        metadata["technician_status"] = "arrived"
+        appointment.metadata = metadata
+        appointment.save(update_fields=["metadata", "updated_at"])
+        technician_name = appointment.technician.user.get_full_name() or appointment.technician.user.username
+        _send_client_telegram(
+            appointment,
+            f"{technician_name} ha llegado al destino y esta listo para comenzar.",
+        )
+        return self._render(appointment)
+
+    @action(detail=True, methods=["post"])
     def complete(self, request, pk=None):
         appointment = self.get_object()
         self._require_technician_actor(request.user, appointment)
         serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        updated = _execute_service(
+            complete_appointment,
+            appointment=appointment,
+            actor=request.user,
+        )
+        technician_name = updated.technician.user.get_full_name() or updated.technician.user.username
+        survey_url = f"{settings.FRONTEND_URL}/dashboard?rate={updated.id}"
+        _send_client_telegram(
+            updated,
+            f"Servicio completado por {technician_name}.\n\nCalifica tu experiencia aqui:\n{survey_url}",
+        )
+        return self._render(updated)
+
+    @action(detail=True, methods=["post"])
+    def confirm_complete(self, request, pk=None):
+        appointment = self.get_object()
+        self._require_client_actor(request.user, appointment)
+        serializer = AppointmentCompleteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         updated = _execute_service(
             complete_appointment,
@@ -269,12 +334,36 @@ class AppointmentViewSet(viewsets.ModelViewSet):
             "Only the assigned technician or an administrator can perform this action."
         )
 
+    def _require_client_actor(self, user, appointment):
+        if (
+            user.is_staff
+            or user.is_superuser
+            or getattr(user, "role", "") == User.Role.ADMIN
+        ):
+            return
+        if appointment.client_id == user.id:
+            return
+        raise PermissionDenied(
+            "Only the appointment client or an administrator can perform this action."
+        )
+
     def _render(self, appointment):
         return Response(
             AppointmentSerializer(
                 appointment, context=self.get_serializer_context()
             ).data
         )
+
+
+def _send_client_telegram(appointment, text: str) -> None:
+    chat_id = getattr(appointment.client, "telegram_chat_id", None)
+    if not chat_id:
+        return
+    try:
+        payload = build_telegram_message_payload(chat_id=int(chat_id), text=text, preview_url=False)
+        TelegramBotClient().send_message(payload)
+    except Exception as exc:
+        logger.warning("Failed to send Telegram status notification to client: %s", exc)
 
 
 class TechnicianAvailableSlotsAPIView(APIView):

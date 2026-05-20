@@ -60,6 +60,7 @@ class ServiceLeadSerializer(serializers.ModelSerializer):
             "scheduled_start": appointment.scheduled_start,
             "scheduled_end": appointment.scheduled_end,
             "status": appointment.status,
+            "technician_status": metadata.get("technician_status") or "",
             "service_title": appointment.service.title if appointment.service_id else (obj.service.title if obj.service_id else ""),
             "client_username": appointment.client.username,
             "client_address": metadata.get("client_address") or getattr(appointment.client, "address", ""),

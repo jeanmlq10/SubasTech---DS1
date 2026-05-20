@@ -200,6 +200,34 @@ class AppointmentWorkflowTests(TestCase):
         self.assertEqual(appointment.reschedule_reason, "Me queda mejor mas tarde")
         self.assertEqual(appointment.scheduled_start, self._aware_datetime(self.available_date, 11))
 
+    def test_client_can_confirm_appointment_complete(self):
+        appointment = self._create_appointment(
+            client=self.client_user,
+            start_hour=9,
+            end_hour=10,
+        )
+        self.client.force_authenticate(self.client_user)
+
+        response = self.client.post(f"/api/appointments/{appointment.id}/confirm_complete/", {}, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        appointment.refresh_from_db()
+        self.assertEqual(appointment.status, Appointment.Status.COMPLETED)
+
+    def test_other_client_cannot_confirm_appointment_complete(self):
+        appointment = self._create_appointment(
+            client=self.client_user,
+            start_hour=9,
+            end_hour=10,
+        )
+        self.client.force_authenticate(self.other_client)
+
+        response = self.client.post(f"/api/appointments/{appointment.id}/confirm_complete/", {}, format="json")
+
+        self.assertEqual(response.status_code, 404)
+        appointment.refresh_from_db()
+        self.assertEqual(appointment.status, Appointment.Status.CONFIRMED)
+
     def test_client_only_sees_own_appointments(self):
         own_appointment = self._create_appointment(
             client=self.client_user,

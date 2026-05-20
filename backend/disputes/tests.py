@@ -4,7 +4,7 @@ from rest_framework.test import APIClient
 
 from audit.models import AuditEvent
 from catalog.models import Category, Service, TechnicianProfile
-from .models import Dispute
+from .models import Dispute, DisputeEvidence
 from .services import build_dispute_assistant_payload, classify_dispute
 
 
@@ -205,3 +205,58 @@ class DisputePermissionTests(TestCase):
 
         self.assertEqual(response.status_code, 201)
         self.assertTrue(AuditEvent.objects.filter(event_type=AuditEvent.EventType.DISPUTE_CREATED).exists())
+
+    def test_client_can_add_evidence_to_own_dispute(self):
+        self.client.force_authenticate(self.client_user)
+
+        response = self.client.post(
+            f"/api/disputes/{self.dispute.id}/evidence/",
+            {"note": "Adjunto detalle del problema para revision."},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(DisputeEvidence.objects.count(), 1)
+        evidence = DisputeEvidence.objects.get()
+        self.assertEqual(evidence.dispute, self.dispute)
+        self.assertEqual(evidence.uploaded_by, self.client_user)
+        self.assertEqual(evidence.note, "Adjunto detalle del problema para revision.")
+
+    def test_technician_can_add_evidence_to_assigned_dispute(self):
+        self.client.force_authenticate(self.tech_user)
+
+        response = self.client.post(
+            f"/api/disputes/{self.dispute.id}/evidence/",
+            {"note": "Comparto mi version del servicio realizado."},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(DisputeEvidence.objects.filter(uploaded_by=self.tech_user, dispute=self.dispute).exists())
+
+    def test_other_client_cannot_add_evidence_to_hidden_dispute(self):
+        self.client.force_authenticate(self.other_client)
+
+        response = self.client.post(
+            f"/api/disputes/{self.dispute.id}/evidence/",
+            {"note": "No deberia poder aportar aqui."},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(DisputeEvidence.objects.exists())
+
+    def test_resolved_dispute_rejects_new_evidence(self):
+        self.dispute.status = Dispute.Status.RESOLVED
+        self.dispute.decision = Dispute.Decision.FAVOR_CLIENT
+        self.dispute.save(update_fields=["status", "decision", "updated_at"])
+        self.client.force_authenticate(self.client_user)
+
+        response = self.client.post(
+            f"/api/disputes/{self.dispute.id}/evidence/",
+            {"note": "Evidencia tardia."},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(DisputeEvidence.objects.exists())
