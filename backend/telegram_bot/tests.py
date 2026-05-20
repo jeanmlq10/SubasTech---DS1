@@ -6,6 +6,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from appointments.models import Appointment
+from auctions.models import Auction
 from audit.models import AuditEvent
 from catalog.models import Category, Service, TechnicianAvailability, TechnicianProfile, Zone
 from leads.models import ServiceLead
@@ -193,6 +194,26 @@ class TelegramBotTests(TestCase):
                 entity_id=str(appointment.lead_id),
             ).exists()
         )
+
+    def test_recommendation_can_create_auction_instead_of_direct_booking(self):
+        first_response = self._send_message("Necesito un electricista en Riomar")
+        self.assertEqual(first_response.json()["step"], "waiting_technician_selection")
+        self.assertIn("0 para crear una subasta", first_response.json()["reply"])
+
+        auction_response = self._send_message("0")
+
+        self.assertEqual(auction_response.status_code, 200)
+        self.assertEqual(auction_response.json()["step"], "initial")
+        self.assertIn("Subasta creada", auction_response.json()["reply"])
+        self.assertEqual(Auction.objects.count(), 1)
+        self.assertEqual(Appointment.objects.count(), 0)
+        self.assertEqual(ServiceLead.objects.count(), 0)
+        auction = Auction.objects.select_related("client", "category", "zone").get()
+        self.assertEqual(auction.client, self.user)
+        self.assertEqual(auction.category, self.category)
+        self.assertEqual(auction.zone, self.zone)
+        self.assertEqual(auction.source, Auction.Source.TELEGRAM)
+        self.assertEqual(auction.metadata["chat_id"], 101)
 
     def test_webhook_collects_client_data_and_auto_creates_booking(self):
         first_response = self._send_webhook_message("Necesito un electricista en Riomar", chat_id=202)

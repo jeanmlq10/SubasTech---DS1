@@ -25,9 +25,10 @@ from appointments.services import (
     get_available_slots,
     reschedule_appointment,
 )
+from auctions.models import Auction
 from audit.models import AuditEvent
 from audit.services import log_audit_event
-from catalog.models import Service, TechnicianProfile, Zone
+from catalog.models import Category, Service, TechnicianProfile, Zone
 from leads.models import ServiceLead
 from notifications.models import Notification
 from notifications.services import build_telegram_message_payload, create_notification
@@ -77,6 +78,7 @@ ZONE_KEYWORDS = {
 }
 YES_CHOICES = {"si", "s", "confirmo", "yes"}
 NO_CHOICES = {"no", "n"}
+AUCTION_CHOICES = {"0", "ofertas", "oferta", "subasta", "recibir ofertas", "quiero ofertas"}
 RESET_CHOICES = {"inicio", "menu", "menú", "volver", "reiniciar", "empezar", "cancelar flujo"}
 RESET_HINT = "Escribe INICIO para volver al principio."
 CONTACT_PROMPTS = {
@@ -432,9 +434,12 @@ def _handle_zone_selection(session: ChatSession, text: str, state: dict) -> str:
 
 def _handle_technician_selection(session: ChatSession, text: str, state: dict) -> str:
     recommendations = state.get("recommendations") or []
+    if text.strip().lower() in AUCTION_CHOICES:
+        return _create_auction_from_chat(session, state)
+
     selected_index = _parse_numeric_choice(text, len(recommendations))
     if selected_index is None:
-        return f"Responde con un numero entre 1 y {len(recommendations)} para escoger tecnico."
+        return f"Responde con un numero entre 1 y {len(recommendations)} para escoger tecnico, o 0 para recibir ofertas."
 
     selected = recommendations[selected_index]
     technician = TechnicianProfile.objects.filter(pk=selected["technician_id"]).first()
@@ -511,6 +516,53 @@ def _handle_contact_collection(session: ChatSession, text: str, state: dict, ste
         return CONTACT_PROMPTS[next_field]
 
     return _finalize_booking(session, updated_state)
+
+
+def _create_auction_from_chat(session: ChatSession, state: dict) -> str:
+    if session.user_id is None:
+        _ensure_client_user(session, state)
+
+    category = _resolve_auction_category(state)
+    if category is None:
+        _reset_session(session)
+        return "No pude crear la subasta porque no identifique la categoria. Intenta de nuevo desde el inicio."
+
+    zone = _find_zone(state.get("zona"))
+    auction = Auction.objects.create(
+        client=session.user,
+        category=category,
+        zone=zone,
+        title=f"Solicitud de {CATEGORY_DISPLAY_NAMES.get(state.get('categoria'), category.name)}",
+        description=state.get("request_text") or f"Solicitud desde Telegram para {category.name}",
+        location=ZONE_DISPLAY_NAMES.get(state.get("zona"), state.get("zona") or ""),
+        urgency="normal",
+        source=Auction.Source.TELEGRAM,
+        metadata={
+            "source": CHATBOT_SOURCE,
+            "chat_id": session.chat_id,
+            "category": state.get("categoria"),
+            "zone": state.get("zona"),
+        },
+    )
+    log_audit_event(
+        event_type=AuditEvent.EventType.LEAD_CREATED,
+        actor=session.user,
+        channel="telegram",
+        source="telegram_bot.auction",
+        entity_type="auction",
+        entity_id=str(auction.id),
+        status="success",
+        message="Auction created from Telegram chatbot",
+        metadata={"category_id": category.id, "zone_id": zone.id if zone else None},
+    )
+    _reset_session(session)
+    return (
+        "Subasta creada para recibir ofertas de tecnicos verificados.\n\n"
+        f"Solicitud: {auction.title}\n"
+        f"Zona: {auction.location or 'Sin zona'}\n"
+        f"Numero de subasta: {auction.id}\n\n"
+        "Cuando un tecnico envie una oferta, podras revisarla desde tu dashboard."
+    )
 
 
 def _start_cancel_flow(session: ChatSession) -> str:
@@ -751,6 +803,22 @@ def _recommend_technicians(category: str, zone: str) -> list[dict]:
     return list(recommend_services(request_payload))
 
 
+def _resolve_auction_category(state: dict) -> Category | None:
+    recommendations = state.get("recommendations") or []
+    if recommendations:
+        service = Service.objects.select_related("category").filter(pk=recommendations[0].get("service_id")).first()
+        if service is not None:
+            return service.category
+
+    category_key = state.get("categoria")
+    display_name = CATEGORY_DISPLAY_NAMES.get(category_key, category_key)
+    return (
+        Category.objects.filter(slug=category_key).first()
+        or Category.objects.filter(name__iexact=display_name).first()
+        or Category.objects.filter(name__icontains=display_name or "").first()
+    )
+
+
 def _ensure_session_access(user, session: ChatSession) -> None:
     if user.is_staff or user.is_superuser:
         return
@@ -834,6 +902,7 @@ def _build_recommendation_reply(category: str, location: str | None, recommendat
             f"{index}. {item['technician_name']} | {item['service_title']} | score {item['score']} | respuesta aprox. {item['response_time_minutes']} min"
         )
     lines.append("\nResponde con el numero del tecnico para ver horarios disponibles.")
+    lines.append("Tambien puedes responder 0 para crear una subasta y recibir ofertas.")
     return "\n".join(lines)
 
 

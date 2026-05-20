@@ -45,6 +45,7 @@ type BidDraft = {
   message: string;
   serviceId: string;
   estimatedMinutes: string;
+  availableFrom: string;
 };
 
 const emptyServiceForm: ServiceForm = {
@@ -265,12 +266,13 @@ export function TechnicianDashboard() {
           amount: draft.amount,
           message: draft.message,
           estimated_minutes: Number(draft.estimatedMinutes || 60),
+          available_from: draft.availableFrom || null,
         }),
       });
       if (!response.ok) {
         throw new Error("Bid request failed");
       }
-      setBidDrafts((current) => ({ ...current, [auctionId]: { amount: "", message: "", serviceId: "", estimatedMinutes: "60" } }));
+      setBidDrafts((current) => ({ ...current, [auctionId]: { amount: "", message: "", serviceId: "", estimatedMinutes: "60", availableFrom: "" } }));
       await loadWorkspace(token);
       setStatus("success");
       setMessage("Oferta enviada.");
@@ -385,7 +387,7 @@ export function TechnicianDashboard() {
                 </div>
               ) : (
                 openAuctions.map((auction) => {
-                  const draft = bidDrafts[auction.id] ?? { amount: "", message: "", serviceId: "", estimatedMinutes: "60" };
+                  const draft = bidDrafts[auction.id] ?? { amount: "", message: "", serviceId: "", estimatedMinutes: "60", availableFrom: "" };
                   const ownBid = auction.bids[0];
                   return (
                     <div key={auction.id} className="rounded-2xl border border-white/10 bg-white/[0.07] p-5 shadow-lg">
@@ -401,7 +403,7 @@ export function TechnicianDashboard() {
                         </div>
                       </div>
 
-                      <div className="mt-4 grid gap-3 md:grid-cols-3">
+                      <div className="mt-4 grid gap-3 md:grid-cols-4">
                         <Input
                           type="number"
                           min="0"
@@ -439,6 +441,15 @@ export function TechnicianDashboard() {
                             setBidDrafts((current) => ({ ...current, [auction.id]: { ...draft, estimatedMinutes: event.target.value } }))
                           }
                           placeholder="Minutos estimados"
+                          className={fieldClass}
+                          disabled={Boolean(ownBid)}
+                        />
+                        <Input
+                          type="datetime-local"
+                          value={draft.availableFrom}
+                          onChange={(event) =>
+                            setBidDrafts((current) => ({ ...current, [auction.id]: { ...draft, availableFrom: event.target.value } }))
+                          }
                           className={fieldClass}
                           disabled={Boolean(ownBid)}
                         />

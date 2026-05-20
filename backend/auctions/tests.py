@@ -1,10 +1,13 @@
 from decimal import Decimal
+from datetime import datetime, time, timedelta
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 
-from catalog.models import Category, Service, TechnicianProfile, Zone
+from appointments.models import Appointment
+from catalog.models import Category, Service, TechnicianAvailability, TechnicianProfile, Zone
 from leads.models import ServiceLead
 
 from .models import Auction, Bid
@@ -127,6 +130,35 @@ class AuctionWorkflowTests(TestCase):
         self.assertEqual(lead.status, ServiceLead.Status.ACCEPTED)
         self.assertEqual(lead.metadata["auction_id"], auction.id)
 
+    def test_awarding_bid_with_available_from_creates_appointment(self):
+        auction = self.create_auction()
+        start = self._next_available_start()
+        TechnicianAvailability.objects.create(
+            technician=self.profile,
+            weekday=timezone.localtime(start).isoweekday(),
+            start_time=time(9, 0),
+            end_time=time(12, 0),
+            is_active=True,
+        )
+        bid = Bid.objects.create(
+            auction=auction,
+            technician=self.profile,
+            service=self.service,
+            amount=85000,
+            available_from=start,
+            estimated_minutes=60,
+        )
+        self.client_api.force_authenticate(self.client_user)
+
+        response = self.client_api.post(f"/api/auctions/{auction.id}/award/", {"bid_id": bid.id}, format="json")
+
+        self.assertEqual(response.status_code, 200)
+        appointment = Appointment.objects.select_related("lead").get()
+        self.assertEqual(appointment.client, self.client_user)
+        self.assertEqual(appointment.technician, self.profile)
+        self.assertEqual(appointment.lead.metadata["auction_id"], auction.id)
+        self.assertEqual(appointment.metadata["source"], "auction_award")
+
     def test_other_client_cannot_award_auction(self):
         auction = self.create_auction()
         bid = Bid.objects.create(auction=auction, technician=self.profile, amount=85000)
@@ -162,3 +194,8 @@ class AuctionWorkflowTests(TestCase):
         self.assertEqual(len(response.json()), 1)
         self.assertEqual(len(response.json()[0]["bids"]), 1)
         self.assertEqual(response.json()[0]["bids"][0]["id"], own_bid.id)
+
+    def _next_available_start(self):
+        today = timezone.localdate()
+        target_date = today + timedelta(days=(1 - today.isoweekday()) % 7 or 7)
+        return timezone.make_aware(datetime.combine(target_date, time(9, 0)), timezone.get_current_timezone())

@@ -1,3 +1,6 @@
+from datetime import timedelta
+
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 from rest_framework import permissions, status, viewsets
@@ -6,6 +9,8 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 
 from accounts.models import User
+from appointments.models import Appointment
+from appointments.services import create_appointment
 from audit.models import AuditEvent
 from audit.services import log_audit_event
 from leads.models import ServiceLead
@@ -116,6 +121,29 @@ class AuctionViewSet(viewsets.ModelViewSet):
                     "source": "auction_award",
                 },
             )
+            if bid.available_from is not None:
+                try:
+                    appointment = create_appointment(
+                        client=auction.client,
+                        technician=bid.technician,
+                        service=bid.service,
+                        lead=lead,
+                        scheduled_start=bid.available_from,
+                        scheduled_end=bid.available_from + timedelta(minutes=bid.estimated_minutes),
+                        status=Appointment.Status.CONFIRMED,
+                        metadata={
+                            "source": "auction_award",
+                            "auction_id": auction.id,
+                            "bid_id": bid.id,
+                            "client_address": auction.location,
+                            "request_text": auction.description,
+                        },
+                        actor=request.user,
+                    )
+                    lead.metadata = {**lead.metadata, "appointment_id": appointment.id}
+                    lead.save(update_fields=["metadata", "updated_at"])
+                except DjangoValidationError as exc:
+                    raise ValidationError(exc.message_dict if hasattr(exc, "message_dict") else exc.messages) from exc
 
         log_audit_event(
             event_type=AuditEvent.EventType.LEAD_STATUS_CHANGED,
