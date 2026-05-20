@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { Calendar, ClipboardList, LayoutDashboard, LogOut, MessageCircle, Settings, User } from "lucide-react";
@@ -14,12 +13,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Separator } from "@/components/ui/separator";
 
 const sidebarLinks = [
-  { href: "/dashboard", label: "Resumen", icon: LayoutDashboard },
-  { href: "#", label: "Solicitudes", icon: ClipboardList },
-  { href: "#", label: "Citas", icon: Calendar },
-  { href: "#", label: "Mensajes", icon: MessageCircle },
-  { href: "#", label: "Perfil", icon: User },
-  { href: "#", label: "Ajustes", icon: Settings },
+  { href: "#overview", label: "Resumen", icon: LayoutDashboard },
+  { href: "#requests", label: "Solicitudes", icon: ClipboardList },
+  { href: "#appointments", label: "Citas", icon: Calendar },
+  { href: "#activity", label: "Mensajes", icon: MessageCircle },
+  { href: "#profile", label: "Perfil", icon: User },
+  { href: "#settings", label: "Ajustes", icon: Settings },
 ];
 
 const surfaceClass = "rounded-2xl border border-white/10 bg-white/5 shadow-2xl backdrop-blur-md";
@@ -325,9 +324,9 @@ export function ClientDashboard() {
           <nav className="space-y-1">
             {sidebarLinks.map((link) => {
               const Icon = link.icon;
-              const active = link.href === "/dashboard";
+              const active = link.href === "#overview";
               return (
-                <Link
+                <a
                   key={link.label}
                   href={link.href}
                   className={`flex items-center gap-2 rounded-xl px-3 py-2 text-sm transition-colors ${
@@ -336,7 +335,7 @@ export function ClientDashboard() {
                 >
                   <Icon className="size-4" />
                   {link.label}
-                </Link>
+                </a>
               );
             })}
           </nav>
@@ -348,7 +347,7 @@ export function ClientDashboard() {
         </aside>
 
         <main className="flex-1 space-y-6">
-          <section className={`${surfaceClass} p-6 md:p-8`}>
+          <section id="overview" className={`${surfaceClass} scroll-mt-6 p-6 md:p-8`}>
             <Badge className="mb-3 border-white/10 bg-white/10 text-purple-100 hover:bg-white/10">Bienvenido</Badge>
             <h2 className="text-2xl font-bold text-white sm:text-3xl">Hola{username ? `, ${username}` : ""} - tu espacio en SubasTech</h2>
             <p className="mt-2 max-w-2xl text-sm text-purple-100 sm:text-base">
@@ -370,7 +369,7 @@ export function ClientDashboard() {
             ))}
           </section>
 
-          <section className="grid gap-4 lg:grid-cols-2">
+          <section id="requests" className="grid scroll-mt-6 gap-4 lg:grid-cols-2">
             <Card className={`${surfaceClass} border-white/10 bg-white/5 text-white`}>
               <CardHeader>
                 <CardTitle className="text-white">Nueva subasta</CardTitle>
@@ -500,7 +499,7 @@ export function ClientDashboard() {
             </Card>
           </section>
 
-          <Card className={`${surfaceClass} border-white/10 bg-white/5 text-white`}>
+          <Card id="appointments" className={`${surfaceClass} scroll-mt-6 border-white/10 bg-white/5 text-white`}>
             <CardHeader>
               <CardTitle className="text-white">Mis citas</CardTitle>
               <CardDescription className="text-purple-200">Confirma servicios completados o abre una disputa si algo salio mal.</CardDescription>
@@ -631,15 +630,37 @@ export function ClientDashboard() {
           </Card>
 
           <section className="grid gap-4 lg:grid-cols-2">
-            <Card className={`${surfaceClass} border-white/10 bg-white/5 text-white`}>
+            <Card id="activity" className={`${surfaceClass} scroll-mt-6 border-white/10 bg-white/5 text-white`}>
               <CardHeader>
-                <CardTitle className="text-white">Actividad reciente</CardTitle>
+                <CardTitle className="text-white">Mensajes y actividad</CardTitle>
                 <CardDescription className="text-purple-200">Resumen de tus ultimas interacciones</CardDescription>
               </CardHeader>
               <CardContent>
                 <p className="text-sm text-purple-100">
                   {auctions.length === 0 ? "Aun no hay actividad registrada." : `Tienes ${auctions.length} solicitudes y ${receivedBids} ofertas recibidas.`}
                 </p>
+              </CardContent>
+            </Card>
+            <Card id="profile" className={`${surfaceClass} scroll-mt-6 border-white/10 bg-white/5 text-white`}>
+              <CardHeader>
+                <CardTitle className="text-white">Perfil</CardTitle>
+                <CardDescription className="text-purple-200">Datos basicos de tu cuenta cliente</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm text-purple-100">
+                <p>Usuario: {username || "Cliente"}</p>
+                <p>Desde aqui centralizas tus solicitudes creadas por Telegram y dashboard.</p>
+              </CardContent>
+            </Card>
+            <Card id="settings" className={`${surfaceClass} scroll-mt-6 border-white/10 bg-white/5 text-white`}>
+              <CardHeader>
+                <CardTitle className="text-white">Ajustes</CardTitle>
+                <CardDescription className="text-purple-200">Acciones rapidas de la sesion</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button variant="ghost" className="border border-white/10 text-purple-100 hover:bg-white/10 hover:text-white" onClick={logout}>
+                  <LogOut className="mr-2 size-4" />
+                  Cerrar sesion
+                </Button>
               </CardContent>
             </Card>
             <Card className={`${surfaceClass} border-white/10 bg-white/5 text-white`}>

@@ -286,8 +286,11 @@ class DemoSeedTests(TestCase):
     def test_seed_demo_data_creates_project_demo_records_idempotently(self):
         from django.core.management import call_command
         from django.contrib.auth import get_user_model
+        from appointments.models import Appointment
+        from auctions.models import Auction
         from disputes.models import Dispute
         from leads.models import ServiceLead
+        from reputation.models import Rating
 
         call_command("seed_demo_data")
         call_command("seed_demo_data")
@@ -296,7 +299,12 @@ class DemoSeedTests(TestCase):
         self.assertTrue(user_model.objects.filter(username="demo_admin", role="admin").exists())
         self.assertTrue(user_model.objects.filter(username="demo_arbiter", role="arbiter").exists())
         self.assertTrue(user_model.objects.filter(username="tech_carlos", role="technician").exists())
-        self.assertGreaterEqual(TechnicianProfile.objects.filter(is_verified=True).count(), 3)
-        self.assertGreaterEqual(Service.objects.filter(is_active=True).count(), 3)
-        self.assertGreaterEqual(ServiceLead.objects.count(), 3)
-        self.assertGreaterEqual(Dispute.objects.count(), 1)
+        self.assertGreaterEqual(TechnicianProfile.objects.filter(is_verified=True).count(), 30)
+        self.assertGreaterEqual(Service.objects.filter(is_active=True).count(), 30)
+        self.assertGreaterEqual(TechnicianProfile.objects.filter(zones__slug="barranquilla-riomar").count(), 3)
+        self.assertGreaterEqual(TechnicianProfile.objects.filter(zones__slug="barranquilla-boston").count(), 2)
+        self.assertEqual(Auction.objects.count(), 0)
+        self.assertEqual(Appointment.objects.count(), 0)
+        self.assertEqual(ServiceLead.objects.count(), 0)
+        self.assertEqual(Dispute.objects.count(), 0)
+        self.assertEqual(Rating.objects.count(), 0)
