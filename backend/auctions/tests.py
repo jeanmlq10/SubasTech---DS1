@@ -3,6 +3,7 @@ from datetime import datetime, time, timedelta
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from unittest.mock import patch
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -94,6 +95,58 @@ class AuctionWorkflowTests(TestCase):
         bid = Bid.objects.get()
         self.assertEqual(bid.technician, self.profile)
         self.assertEqual(bid.amount, Decimal("85000.00"))
+
+    def test_telegram_auction_requires_bid_available_from(self):
+        auction = self.create_auction()
+        auction.source = Auction.Source.TELEGRAM
+        auction.metadata = {"chat_id": 123}
+        auction.save(update_fields=["source", "metadata", "updated_at"])
+        self.client_api.force_authenticate(self.tech_user)
+
+        response = self.client_api.post(
+            "/api/auction-bids/",
+            {
+                "auction": auction.id,
+                "service": self.service.id,
+                "amount": "85000",
+                "message": "Puedo atender hoy.",
+                "estimated_minutes": 90,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("available_from", response.json())
+        self.assertFalse(Bid.objects.exists())
+
+    @patch("auctions.views.TelegramBotClient.send_message")
+    def test_telegram_auction_bid_notifies_client_chat(self, mock_send_message):
+        auction = self.create_auction()
+        auction.source = Auction.Source.TELEGRAM
+        auction.metadata = {"chat_id": 123}
+        auction.save(update_fields=["source", "metadata", "updated_at"])
+        self.client_api.force_authenticate(self.tech_user)
+        start = self._next_available_start()
+
+        response = self.client_api.post(
+            "/api/auction-bids/",
+            {
+                "auction": auction.id,
+                "service": self.service.id,
+                "amount": "85000",
+                "message": "Puedo atender hoy.",
+                "estimated_minutes": 90,
+                "available_from": start.isoformat(),
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        mock_send_message.assert_called_once()
+        payload = mock_send_message.call_args.args[0]
+        self.assertEqual(payload["chat_id"], 123)
+        self.assertIn("ACEPTO:", payload["text"])
+        self.assertIn("auction-tech", payload["text"])
 
     def test_unverified_technician_cannot_bid(self):
         auction = self.create_auction()

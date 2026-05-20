@@ -62,6 +62,9 @@ class BidSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Only verified technicians can create bids.")
         if service is not None and service.technician_id != profile.id:
             raise serializers.ValidationError({"service": "The service must belong to the authenticated technician."})
+        auction = attrs.get("auction")
+        if auction and auction.source == Auction.Source.TELEGRAM and attrs.get("available_from") is None:
+            raise serializers.ValidationError({"available_from": "Telegram auctions require a proposed appointment time."})
         return attrs
 
 

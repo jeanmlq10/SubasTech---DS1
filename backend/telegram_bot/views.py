@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import unicodedata
 from datetime import datetime, timedelta
 
 from django.conf import settings
@@ -25,7 +26,8 @@ from appointments.services import (
     get_available_slots,
     reschedule_appointment,
 )
-from auctions.models import Auction
+from auctions.models import Auction, Bid
+from auctions.services import award_auction_bid
 from audit.models import AuditEvent
 from audit.services import log_audit_event
 from catalog.models import Category, Service, TechnicianProfile, Zone
@@ -335,6 +337,9 @@ def handle_conversation(session: ChatSession, text: str, intent: dict) -> str:
         _reset_session(session)
         return _build_welcome_message()
 
+    if _is_bid_acceptance(cleaned_text):
+        return _handle_bid_acceptance(session, cleaned_text)
+
     if accion == "saludo" or lowered in {"/start", "hola", "buenas", "buenos dias"}:
         _reset_session(session)
         return _build_welcome_message()
@@ -343,6 +348,8 @@ def handle_conversation(session: ChatSession, text: str, intent: dict) -> str:
         return _handle_zone_selection(session, cleaned_text, state)
     if step == "waiting_technician_selection":
         return _handle_technician_selection(session, cleaned_text, state)
+    if step == "waiting_auction_address":
+        return _handle_auction_address(session, cleaned_text, state)
     if step == "waiting_slot_selection":
         return _handle_slot_booking(session, cleaned_text, state)
     if step in {
@@ -445,7 +452,7 @@ def _handle_zone_selection(session: ChatSession, text: str, state: dict) -> str:
 def _handle_technician_selection(session: ChatSession, text: str, state: dict) -> str:
     recommendations = state.get("recommendations") or []
     if text.strip().lower() in AUCTION_CHOICES:
-        return _create_auction_from_chat(session, state)
+        return _start_auction_flow(session, state)
 
     selected_index = _parse_numeric_choice(text, len(recommendations))
     if selected_index is None:
@@ -453,6 +460,7 @@ def _handle_technician_selection(session: ChatSession, text: str, state: dict) -
 
     selected = recommendations[selected_index]
     technician = TechnicianProfile.objects.filter(pk=selected["technician_id"]).first()
+
     service = Service.objects.filter(pk=selected["service_id"]).first()
     if technician is None or service is None:
         _reset_session(session)
@@ -528,6 +536,30 @@ def _handle_contact_collection(session: ChatSession, text: str, state: dict, ste
     return _finalize_booking(session, updated_state)
 
 
+def _start_auction_flow(session: ChatSession, state: dict) -> str:
+    user_address = (getattr(session.user, "address", "") or "").strip() if session.user else ""
+    if user_address:
+        updated_state = dict(state)
+        updated_state["auction_address"] = user_address
+        return _create_auction_from_chat(session, updated_state)
+    _update_session(session, step="waiting_auction_address", state_data=state)
+    return (
+        "Para que el tecnico pueda llegar, necesito la direccion del servicio.\n"
+        "Escribeme la calle, barrio o una referencia clara, por ejemplo: Cra 50 #80-45 Riomar."
+    )
+
+
+def _handle_auction_address(session: ChatSession, text: str, state: dict) -> str:
+    if len(text.strip()) < 8:
+        return "Comparte una direccion mas completa, por ejemplo: Cra 50 #80-45 Riomar o Calle 84 frente al parque."
+    updated_state = dict(state)
+    updated_state["auction_address"] = text.strip()
+    if session.user:
+        session.user.address = text.strip()
+        session.user.save(update_fields=["address"])
+    return _create_auction_from_chat(session, updated_state)
+
+
 def _create_auction_from_chat(session: ChatSession, state: dict) -> str:
     if session.user_id is None:
         _ensure_client_user(session, state)
@@ -538,22 +570,31 @@ def _create_auction_from_chat(session: ChatSession, state: dict) -> str:
         return "No pude crear la subasta porque no identifique la categoria. Intenta de nuevo desde el inicio."
 
     zone = _find_zone(state.get("zona"))
-    auction = Auction.objects.create(
-        client=session.user,
-        category=category,
-        zone=zone,
-        title=f"Solicitud de {CATEGORY_DISPLAY_NAMES.get(state.get('categoria'), category.name)}",
-        description=state.get("request_text") or f"Solicitud desde Telegram para {category.name}",
-        location=ZONE_DISPLAY_NAMES.get(state.get("zona"), state.get("zona") or ""),
-        urgency="normal",
-        source=Auction.Source.TELEGRAM,
-        metadata={
-            "source": CHATBOT_SOURCE,
-            "chat_id": session.chat_id,
-            "category": state.get("categoria"),
-            "zone": state.get("zona"),
-        },
-    )
+    with transaction.atomic():
+        previous_auctions = Auction.objects.filter(
+            source=Auction.Source.TELEGRAM,
+            status=Auction.Status.OPEN,
+            metadata__chat_id=session.chat_id,
+        )
+        Bid.objects.filter(auction__in=previous_auctions, status=Bid.Status.PENDING).update(status=Bid.Status.REJECTED)
+        previous_auctions.update(status=Auction.Status.CANCELLED)
+        auction = Auction.objects.create(
+            client=session.user,
+            category=category,
+            zone=zone,
+            title=f"Solicitud de {CATEGORY_DISPLAY_NAMES.get(state.get('categoria'), category.name)}",
+            description=state.get("request_text") or f"Solicitud desde Telegram para {category.name}",
+            location=ZONE_DISPLAY_NAMES.get(state.get("zona"), state.get("zona") or ""),
+            urgency="normal",
+            source=Auction.Source.TELEGRAM,
+            metadata={
+                "source": CHATBOT_SOURCE,
+                "chat_id": session.chat_id,
+                "category": state.get("categoria"),
+                "zone": state.get("zona"),
+                "client_address": state.get("auction_address") or (getattr(session.user, "address", "") if session.user else ""),
+            },
+        )
     log_audit_event(
         event_type=AuditEvent.EventType.LEAD_CREATED,
         actor=session.user,
@@ -566,15 +607,101 @@ def _create_auction_from_chat(session: ChatSession, state: dict) -> str:
         metadata={"category_id": category.id, "zone_id": zone.id if zone else None},
     )
     _reset_session(session)
-    dashboard_link = _build_frontend_link("/login", telegram_chat_id=session.chat_id)
     return (
         "Subasta creada para recibir ofertas de tecnicos verificados.\n\n"
         f"Solicitud: {auction.title}\n"
         f"Zona: {auction.location or 'Sin zona'}\n"
         f"Numero de subasta: {auction.id}\n\n"
-        "Para revisar y adjudicar ofertas, inicia sesion o registrate aqui:\n"
-        f"{dashboard_link}"
+        "Te avisare por Telegram cada vez que un tecnico envie una oferta.\n"
+        "Para aceptar, responde ACEPTO: Nombre Tecnico cuando recibas la oferta."
     )
+
+
+def _is_bid_acceptance(text: str) -> bool:
+    return bool(re.match(r"^\s*acepto\s*:\s*.+", text or "", flags=re.IGNORECASE))
+
+
+def _handle_bid_acceptance(session: ChatSession, text: str) -> str:
+    match = re.match(r"^\s*acepto\s*:\s*(?P<name>.+?)\s*$", text, flags=re.IGNORECASE)
+    technician_text = match.group("name") if match else ""
+    auction = (
+        Auction.objects.select_related("client", "category", "zone")
+        .filter(
+            source=Auction.Source.TELEGRAM,
+            status=Auction.Status.OPEN,
+            metadata__chat_id=session.chat_id,
+        )
+        .order_by("-created_at")
+        .first()
+    )
+    if auction is None:
+        _reset_session(session)
+        return "No encontre una subasta abierta para aceptar. Crea una nueva solicitud si aun necesitas el servicio."
+
+    pending_bids = list(
+        Bid.objects.select_related("technician__user", "service", "auction")
+        .filter(auction=auction, status=Bid.Status.PENDING)
+        .order_by("created_at")
+    )
+    matching_bids = [bid for bid in pending_bids if _technician_name_matches(bid, technician_text)]
+    if not matching_bids:
+        available_names = ", ".join(_bid_technician_name(bid) for bid in pending_bids) or "sin ofertas pendientes"
+        return (
+            f"No encontre una oferta pendiente de '{technician_text}' para la subasta #{auction.id}.\n"
+            f"Ofertas disponibles: {available_names}.\n\n"
+            "Responde con el formato ACEPTO: Nombre Tecnico."
+        )
+    if len(matching_bids) > 1:
+        return "Encontre mas de un tecnico con ese nombre. Responde ACEPTO: Nombre y Apellido como aparece en la oferta."
+
+    bid = matching_bids[0]
+    if bid.available_from is None:
+        return "Esa oferta no tiene horario propuesto. Pidele al tecnico enviar una oferta con fecha y hora."
+
+    try:
+        _lead, appointment = award_auction_bid(
+            auction=auction,
+            bid=bid,
+            actor=auction.client,
+            source="telegram.auction_acceptance",
+        )
+    except DjangoValidationError as exc:
+        logger.warning("Telegram auction acceptance failed: %s", exc)
+        return "No pude aceptar esa oferta porque el horario ya no esta disponible. Espera otra oferta o crea una nueva subasta."
+
+    _reset_session(session)
+    return (
+        "Oferta aceptada y cita creada.\n\n"
+        f"Tecnico: {_bid_technician_name(bid)}\n"
+        f"Servicio: {bid.service.title if bid.service else 'Servicio tecnico'}\n"
+        f"Horario: {_format_local_datetime(appointment.scheduled_start)} - {_format_local_time(appointment.scheduled_end)}\n"
+        f"Direccion/zona: {auction.location or (auction.zone.name if auction.zone else 'Sin zona')}\n"
+        f"Numero de cita: {appointment.id}"
+    )
+
+
+def _technician_name_matches(bid: Bid, raw_name: str) -> bool:
+    requested = _normalize_match_text(raw_name)
+    full_name = _normalize_match_text(_bid_technician_name(bid))
+    username = _normalize_match_text(bid.technician.user.username)
+    return requested in {full_name, username} or requested in full_name
+
+
+def _bid_technician_name(bid: Bid) -> str:
+    return bid.technician.user.get_full_name() or bid.technician.user.username
+
+
+def _normalize_match_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", (value or "").lower())
+    return " ".join("".join(ch for ch in normalized if not unicodedata.combining(ch)).split())
+
+
+def _format_local_datetime(value: datetime) -> str:
+    return timezone.localtime(value).strftime("%Y-%m-%d %H:%M")
+
+
+def _format_local_time(value: datetime) -> str:
+    return timezone.localtime(value).strftime("%H:%M")
 
 
 def _start_cancel_flow(session: ChatSession) -> str:

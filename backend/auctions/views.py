@@ -1,7 +1,5 @@
-from datetime import timedelta
-
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError
 from django.db.models import Q
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
@@ -9,14 +7,12 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 
 from accounts.models import User
-from appointments.models import Appointment
-from appointments.services import create_appointment
-from audit.models import AuditEvent
-from audit.services import log_audit_event
-from leads.models import ServiceLead
+from notifications.services import build_telegram_message_payload
+from telegram_bot.client import TelegramBotClient
 
 from .models import Auction, Bid
 from .serializers import AuctionAwardSerializer, AuctionSerializer, BidSerializer
+from .services import award_auction_bid
 
 
 def _is_admin(user):
@@ -95,66 +91,10 @@ class AuctionViewSet(viewsets.ModelViewSet):
         if bid.status != Bid.Status.PENDING:
             raise ValidationError({"bid_id": "Only pending bids can be awarded."})
 
-        with transaction.atomic():
-            Bid.objects.filter(auction=auction, status=Bid.Status.PENDING).exclude(pk=bid.pk).update(status=Bid.Status.REJECTED)
-            bid.status = Bid.Status.ACCEPTED
-            bid.save(update_fields=["status", "updated_at"])
-            auction.status = Auction.Status.AWARDED
-            auction.winning_bid = bid
-            auction.save(update_fields=["status", "winning_bid", "updated_at"])
-            lead = ServiceLead.objects.create(
-                technician=bid.technician,
-                client_user=auction.client,
-                service=bid.service,
-                client_name=auction.client.get_full_name() or auction.client.username,
-                client_phone=auction.client.phone_number or "",
-                message=auction.description,
-                category=auction.category.name,
-                location=auction.location or (str(auction.zone) if auction.zone_id else ""),
-                urgency=auction.urgency,
-                source=ServiceLead.Source.DASHBOARD,
-                status=ServiceLead.Status.ACCEPTED,
-                metadata={
-                    "auction_id": auction.id,
-                    "bid_id": bid.id,
-                    "amount": str(bid.amount),
-                    "source": "auction_award",
-                },
-            )
-            if bid.available_from is not None:
-                try:
-                    appointment = create_appointment(
-                        client=auction.client,
-                        technician=bid.technician,
-                        service=bid.service,
-                        lead=lead,
-                        scheduled_start=bid.available_from,
-                        scheduled_end=bid.available_from + timedelta(minutes=bid.estimated_minutes),
-                        status=Appointment.Status.CONFIRMED,
-                        metadata={
-                            "source": "auction_award",
-                            "auction_id": auction.id,
-                            "bid_id": bid.id,
-                            "client_address": auction.location,
-                            "request_text": auction.description,
-                        },
-                        actor=request.user,
-                    )
-                    lead.metadata = {**lead.metadata, "appointment_id": appointment.id}
-                    lead.save(update_fields=["metadata", "updated_at"])
-                except DjangoValidationError as exc:
-                    raise ValidationError(exc.message_dict if hasattr(exc, "message_dict") else exc.messages) from exc
-
-        log_audit_event(
-            event_type=AuditEvent.EventType.LEAD_STATUS_CHANGED,
-            actor=request.user,
-            source="auctions.award",
-            entity_type="auction",
-            entity_id=auction.id,
-            status="success",
-            message="Auction awarded and lead created",
-            metadata={"bid_id": bid.id, "lead_id": lead.id, "technician_id": bid.technician_id},
-        )
+        try:
+            award_auction_bid(auction=auction, bid=bid, actor=request.user)
+        except DjangoValidationError as exc:
+            raise ValidationError(exc.message_dict if hasattr(exc, "message_dict") else exc.messages) from exc
         return Response(AuctionSerializer(auction, context={"request": request}).data)
 
 
@@ -179,9 +119,10 @@ class BidViewSet(viewsets.ModelViewSet):
         if not profile:
             raise PermissionDenied("Only technicians can create bids.")
         try:
-            serializer.save(technician=profile, status=Bid.Status.PENDING)
+            bid = serializer.save(technician=profile, status=Bid.Status.PENDING)
         except IntegrityError as exc:
             raise ValidationError({"auction": "You already created a bid for this auction."}) from exc
+        _notify_telegram_auction_bid(bid)
 
     def perform_update(self, serializer):
         bid = serializer.instance
@@ -211,3 +152,24 @@ class BidViewSet(viewsets.ModelViewSet):
         bid.status = Bid.Status.WITHDRAWN
         bid.save(update_fields=["status", "updated_at"])
         return Response(BidSerializer(bid, context={"request": request}).data, status=status.HTTP_200_OK)
+
+
+def _notify_telegram_auction_bid(bid: Bid) -> None:
+    auction = bid.auction
+    chat_id = (auction.metadata or {}).get("chat_id")
+    if auction.source != Auction.Source.TELEGRAM or not chat_id or auction.status != Auction.Status.OPEN:
+        return
+
+    technician_name = bid.technician.user.get_full_name() or bid.technician.user.username
+    available_from = bid.available_from.strftime("%Y-%m-%d %H:%M") if bid.available_from else "Sin horario propuesto"
+    message = (
+        f"Nueva oferta para tu solicitud #{auction.id}\n\n"
+        f"Tecnico: {technician_name}\n"
+        f"Servicio: {bid.service.title if bid.service else 'Servicio tecnico'}\n"
+        f"Precio: ${int(bid.amount):,}".replace(",", ".")
+        + f"\nTiempo estimado: {bid.estimated_minutes} min\n"
+        f"Horario propuesto: {available_from}\n\n"
+        "Para aceptar esta oferta responde exactamente:\n"
+        f"ACEPTO: {technician_name}"
+    )
+    TelegramBotClient().send_message(build_telegram_message_payload(chat_id=int(chat_id), text=message, preview_url=False))
