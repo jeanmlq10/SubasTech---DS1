@@ -238,3 +238,45 @@ export type TechnicianLead = {
   created_at: string;
   updated_at: string;
 };
+
+export type AuctionBid = {
+  id: number;
+  auction: number;
+  auction_title: string;
+  technician: number;
+  technician_name: string;
+  service: number | null;
+  service_title: string | null;
+  amount: string;
+  message: string;
+  estimated_minutes: number;
+  available_from: string | null;
+  status: "pending" | "accepted" | "rejected" | "withdrawn";
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Auction = {
+  id: number;
+  client: number;
+  client_username: string;
+  category: number;
+  category_name: string;
+  zone: number | null;
+  zone_name: string | null;
+  title: string;
+  description: string;
+  location: string;
+  urgency: string;
+  budget_min: string | null;
+  budget_max: string | null;
+  status: "open" | "awarded" | "cancelled" | "expired";
+  source: "telegram" | "dashboard";
+  closes_at: string | null;
+  winning_bid: number | null;
+  metadata: Record<string, unknown>;
+  bids: AuctionBid[];
+  created_at: string;
+  updated_at: string;
+};

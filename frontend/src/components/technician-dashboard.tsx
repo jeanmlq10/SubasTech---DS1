@@ -17,7 +17,7 @@ import {
   Wrench,
 } from "lucide-react";
 
-import { API_URL, Category, OnboardingResponse, TechnicianLead, TechnicianService } from "@/lib/api";
+import { API_URL, Auction, Category, OnboardingResponse, TechnicianLead, TechnicianService } from "@/lib/api";
 import { clearStoredAuth, restoreSession } from "@/lib/auth";
 import { MobileRoleNav } from "@/components/mobile-role-nav";
 import { Badge } from "@/components/ui/badge";
@@ -38,6 +38,13 @@ type ServiceForm = {
   description: string;
   basePrice: string;
   isActive: boolean;
+};
+
+type BidDraft = {
+  amount: string;
+  message: string;
+  serviceId: string;
+  estimatedMinutes: string;
 };
 
 const emptyServiceForm: ServiceForm = {
@@ -89,6 +96,8 @@ export function TechnicianDashboard() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [services, setServices] = useState<TechnicianService[]>([]);
   const [leads, setLeads] = useState<TechnicianLead[]>([]);
+  const [auctions, setAuctions] = useState<Auction[]>([]);
+  const [bidDrafts, setBidDrafts] = useState<Record<number, BidDraft>>({});
   const [serviceForm, setServiceForm] = useState<ServiceForm>(emptyServiceForm);
   const [status, setStatus] = useState<ApiState>("loading");
   const [message, setMessage] = useState("Cargando tu workspace tecnico...");
@@ -119,14 +128,15 @@ export function TechnicianDashboard() {
           Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
         };
-        const [onboardingResponse, categoryResponse, servicesResponse, leadsResponse] = await Promise.all([
+        const [onboardingResponse, categoryResponse, servicesResponse, leadsResponse, auctionsResponse] = await Promise.all([
           fetch(`${API_URL}/technician/onboarding/`, { headers: requestHeaders }),
           fetch(`${API_URL}/categories/`),
           fetch(`${API_URL}/technician/services/`, { headers: requestHeaders }),
           fetch(`${API_URL}/technician/leads/`, { headers: requestHeaders }),
+          fetch(`${API_URL}/auctions/`, { headers: requestHeaders }),
         ]);
 
-        if (!onboardingResponse.ok || !categoryResponse.ok || !servicesResponse.ok || !leadsResponse.ok) {
+        if (!onboardingResponse.ok || !categoryResponse.ok || !servicesResponse.ok || !leadsResponse.ok || !auctionsResponse.ok) {
           throw new Error("Workspace request failed");
         }
 
@@ -139,6 +149,7 @@ export function TechnicianDashboard() {
         setCategories((await categoryResponse.json()) as Category[]);
         setServices((await servicesResponse.json()) as TechnicianService[]);
         setLeads((await leadsResponse.json()) as TechnicianLead[]);
+        setAuctions((await auctionsResponse.json()) as Auction[]);
         setStatus("success");
         setMessage("Workspace sincronizado.");
       } catch {
@@ -232,6 +243,43 @@ export function TechnicianDashboard() {
     }
   }
 
+  async function submitBid(auctionId: number) {
+    if (!token) {
+      setMessage("Inicia sesion antes de ofertar.");
+      return;
+    }
+    const draft = bidDrafts[auctionId];
+    if (!draft?.amount) {
+      setMessage("Ingresa el valor de tu oferta.");
+      return;
+    }
+
+    setStatus("loading");
+    try {
+      const response = await fetch(`${API_URL}/auction-bids/`, {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          auction: auctionId,
+          service: draft.serviceId ? Number(draft.serviceId) : null,
+          amount: draft.amount,
+          message: draft.message,
+          estimated_minutes: Number(draft.estimatedMinutes || 60),
+        }),
+      });
+      if (!response.ok) {
+        throw new Error("Bid request failed");
+      }
+      setBidDrafts((current) => ({ ...current, [auctionId]: { amount: "", message: "", serviceId: "", estimatedMinutes: "60" } }));
+      await loadWorkspace(token);
+      setStatus("success");
+      setMessage("Oferta enviada.");
+    } catch {
+      setStatus("error");
+      setMessage("No se pudo enviar la oferta.");
+    }
+  }
+
   async function deleteService(serviceId: number) {
     if (!token) {
       setMessage("Inicia sesion antes de eliminar servicios.");
@@ -258,6 +306,7 @@ export function TechnicianDashboard() {
 
   const isLoading = status === "loading";
   const scheduledLeads = leads.filter((lead) => lead.appointment !== null).length;
+  const openAuctions = auctions.filter((auction) => auction.status === "open");
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-950 text-white">
@@ -314,6 +363,109 @@ export function TechnicianDashboard() {
         </div>
 
         <p className={`text-sm ${status === "error" ? "text-rose-200" : "text-purple-100"}`}>{message}</p>
+
+        <Card className={`${surfaceClass} border-white/10 bg-white/5 text-white`}>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-3 text-white">
+              <span className="rounded-xl bg-white/10 p-2 text-orange-200">
+                <ClipboardList className="size-5" />
+              </span>
+              Subastas abiertas
+            </CardTitle>
+            <CardDescription className="text-purple-200">
+              Solicitudes de clientes donde puedes competir con una oferta.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Separator className="mb-5 bg-white/10" />
+            <div className="grid gap-4">
+              {openAuctions.length === 0 ? (
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-5 text-center text-sm text-purple-100">
+                  No hay subastas abiertas por ahora.
+                </div>
+              ) : (
+                openAuctions.map((auction) => {
+                  const draft = bidDrafts[auction.id] ?? { amount: "", message: "", serviceId: "", estimatedMinutes: "60" };
+                  const ownBid = auction.bids[0];
+                  return (
+                    <div key={auction.id} className="rounded-2xl border border-white/10 bg-white/[0.07] p-5 shadow-lg">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <p className="text-xs uppercase tracking-[0.24em] text-orange-200">Subasta #{auction.id}</p>
+                          <h3 className="mt-2 text-xl font-semibold text-white">{auction.title}</h3>
+                          <p className="mt-2 text-sm leading-6 text-purple-100">{auction.description}</p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Badge className="border-white/10 bg-white/10 text-purple-100 hover:bg-white/10">{auction.category_name}</Badge>
+                          <Badge className="border-white/10 bg-white/10 text-purple-100 hover:bg-white/10">{auction.location || auction.zone_name || "Sin zona"}</Badge>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 grid gap-3 md:grid-cols-3">
+                        <Input
+                          type="number"
+                          min="0"
+                          step="1000"
+                          value={draft.amount}
+                          onChange={(event) =>
+                            setBidDrafts((current) => ({ ...current, [auction.id]: { ...draft, amount: event.target.value } }))
+                          }
+                          placeholder="Valor oferta"
+                          className={fieldClass}
+                          disabled={Boolean(ownBid)}
+                        />
+                        <select
+                          value={draft.serviceId}
+                          onChange={(event) =>
+                            setBidDrafts((current) => ({ ...current, [auction.id]: { ...draft, serviceId: event.target.value } }))
+                          }
+                          className={selectClass}
+                          disabled={Boolean(ownBid)}
+                        >
+                          <option value="" className="text-slate-900">
+                            Servicio opcional
+                          </option>
+                          {services.map((service) => (
+                            <option key={service.id} value={service.id} className="text-slate-900">
+                              {service.title}
+                            </option>
+                          ))}
+                        </select>
+                        <Input
+                          type="number"
+                          min="15"
+                          value={draft.estimatedMinutes}
+                          onChange={(event) =>
+                            setBidDrafts((current) => ({ ...current, [auction.id]: { ...draft, estimatedMinutes: event.target.value } }))
+                          }
+                          placeholder="Minutos estimados"
+                          className={fieldClass}
+                          disabled={Boolean(ownBid)}
+                        />
+                      </div>
+                      <Textarea
+                        value={draft.message}
+                        onChange={(event) =>
+                          setBidDrafts((current) => ({ ...current, [auction.id]: { ...draft, message: event.target.value } }))
+                        }
+                        className="mt-3 border-white/20 bg-white/10 text-white placeholder:text-white/50"
+                        placeholder="Mensaje para el cliente."
+                        disabled={Boolean(ownBid)}
+                      />
+                      <Button
+                        className="mt-3 bg-gradient-to-r from-orange-400 to-rose-500 font-semibold text-white hover:from-orange-500 hover:to-rose-600"
+                        onClick={() => void submitBid(auction.id)}
+                        disabled={isLoading || Boolean(ownBid)}
+                      >
+                        {ownBid ? "Oferta enviada" : "Enviar oferta"}
+                      </Button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </CardContent>
+        </Card>
 
         <Card className={`${surfaceClass} border-white/10 bg-white/5 text-white`}>
           <CardHeader>

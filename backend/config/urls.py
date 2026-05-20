@@ -9,6 +9,7 @@ from audit.views import AuditEventViewSet
 from accounts.views import EmailOrUsernameTokenObtainPairView, MeAPIView, RegisterAPIView
 from adminpanel.views import AdminSummaryAPIView, AdminTechnicianActionAPIView
 from appointments.views import AppointmentViewSet, TechnicianAvailableSlotsAPIView
+from auctions.views import AuctionViewSet, BidViewSet
 from catalog.views import (
     CategoryViewSet,
     ServiceViewSet,
@@ -31,6 +32,8 @@ router = DefaultRouter()
 router.register("categories", CategoryViewSet)
 router.register("zones", ZoneViewSet)
 router.register("audit/events", AuditEventViewSet, basename="audit-events")
+router.register("auctions", AuctionViewSet, basename="auctions")
+router.register("auction-bids", BidViewSet, basename="auction-bids")
 router.register("technicians", TechnicianProfileViewSet)
 router.register("services", ServiceViewSet)
 router.register("technician/services", TechnicianServiceViewSet, basename="technician-services")
