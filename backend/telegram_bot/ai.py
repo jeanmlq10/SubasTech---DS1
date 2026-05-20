@@ -9,4 +9,6 @@ def extract_intent(message: str) -> dict:
         "categoria": interpretation["categoria"],
         "urgencia": interpretation["urgencia"],
         "zona": interpretation["zona"],
+        "provider": interpretation.get("provider"),
+        "confidence": interpretation.get("confidence"),
     }

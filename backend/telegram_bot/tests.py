@@ -75,6 +75,12 @@ class TelegramBotTests(TestCase):
         self.assertEqual(cancel_intent["accion"], "cancelar")
         self.assertEqual(reschedule_intent["accion"], "reagendar")
 
+    def test_extract_intent_start_command_is_deterministic(self):
+        start_intent = extract_intent("/START")
+
+        self.assertEqual(start_intent["accion"], "saludo")
+        self.assertEqual(start_intent["provider"], "rules")
+
     def test_initial_message_returns_recommendations(self):
         response = self._send_message("Necesito un electricista urgente en Riomar")
 
@@ -125,6 +131,17 @@ class TelegramBotTests(TestCase):
         self.assertEqual(reset_response.json()["step"], "initial")
         self.assertIn("Hola, soy el asistente de SubasTech.", reset_response.json()["reply"])
         self.assertIn("Escribe INICIO para volver al principio.", reset_response.json()["reply"])
+
+    def test_reset_command_also_works_from_technician_selection_step(self):
+        first_response = self._send_message("Necesito un electricista en Riomar")
+        self.assertEqual(first_response.json()["step"], "waiting_technician_selection")
+        self.assertIn("Escribe INICIO para volver al principio.", first_response.json()["reply"])
+
+        reset_response = self._send_message("inicio")
+
+        self.assertEqual(reset_response.status_code, 200)
+        self.assertEqual(reset_response.json()["step"], "initial")
+        self.assertIn("Hola, soy el asistente de SubasTech.", reset_response.json()["reply"])
 
     def test_history_persists_full_conversation(self):
         self._send_message("hola")

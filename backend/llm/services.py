@@ -14,6 +14,7 @@ CATEGORY_KEYWORDS = {
 }
 URGENCY_KEYWORDS = ["urgente", "ya", "emergencia", "inmediato", "rapido", "hoy", "ahora"]
 GREETING_KEYWORDS = ["hola", "buenas", "buenos dias", "/start"]
+RESET_KEYWORDS = ["inicio", "menu", "menú", "volver", "reiniciar", "empezar", "cancelar flujo"]
 CANCEL_KEYWORDS = ["cancelar", "cancelacion", "cancelo"]
 RESCHEDULE_KEYWORDS = ["reagendar", "reprogramar", "cambiar la cita", "mover la cita"]
 LOCATION_PATTERNS = [
@@ -29,6 +30,10 @@ def normalize_text(value: str) -> str:
 
 
 def interpret_message(message: str, *, client: GeminiIntentClient | None = None) -> dict:
+    deterministic = deterministic_intent(message)
+    if deterministic is not None:
+        return deterministic
+
     llm_client = client or GeminiIntentClient()
     try:
         payload = llm_client.interpret(message)
@@ -38,6 +43,45 @@ def interpret_message(message: str, *, client: GeminiIntentClient | None = None)
             "LLM provider failed, using rules fallback: %s", exc
         )
         return rules_fallback(message)
+
+
+def deterministic_intent(message: str) -> dict | None:
+    text_norm = normalize_text(message)
+
+    if not text_norm:
+        return None
+
+    if text_norm in GREETING_KEYWORDS or text_norm in RESET_KEYWORDS:
+        return {
+            "accion": "saludo",
+            "categoria": None,
+            "urgencia": "baja",
+            "zona": None,
+            "confidence": 1.0,
+            "provider": "rules",
+        }
+
+    if any(keyword in text_norm for keyword in CANCEL_KEYWORDS):
+        return {
+            "accion": "cancelar",
+            "categoria": None,
+            "urgencia": "baja",
+            "zona": None,
+            "confidence": 0.95,
+            "provider": "rules",
+        }
+
+    if any(keyword in text_norm for keyword in RESCHEDULE_KEYWORDS):
+        return {
+            "accion": "reagendar",
+            "categoria": None,
+            "urgencia": "baja",
+            "zona": None,
+            "confidence": 0.95,
+            "provider": "rules",
+        }
+
+    return None
 
 
 def rules_fallback(message: str) -> dict:

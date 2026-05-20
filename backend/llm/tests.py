@@ -46,7 +46,15 @@ class LLMTests(TestCase):
 
         self.assertEqual(payload["provider"], "rules")
         self.assertEqual(payload["accion"], "cancelar")
-        self.assertEqual(payload["urgencia"], "alta")
+        self.assertEqual(payload["urgencia"], "baja")
+
+    @patch("llm.client.GeminiIntentClient.interpret")
+    def test_start_command_uses_deterministic_rules_before_llm(self, mock_interpret):
+        payload = interpret_message("/START")
+
+        mock_interpret.assert_not_called()
+        self.assertEqual(payload["provider"], "rules")
+        self.assertEqual(payload["accion"], "saludo")
 
     @patch("llm.client.GeminiIntentClient.interpret")
     def test_fallback_is_used_when_llm_raises(self, mock_interpret):
