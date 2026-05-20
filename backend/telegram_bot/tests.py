@@ -6,6 +6,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from appointments.models import Appointment
+from auctions.models import Auction
 from audit.models import AuditEvent
 from catalog.models import Category, Service, TechnicianAvailability, TechnicianProfile, Zone
 from leads.models import ServiceLead
@@ -19,6 +20,7 @@ from .models import ChatSession, ConversationMessage
 class TelegramBotTests(TestCase):
     def setUp(self):
         self.client = APIClient()
+        self.webhook_client = APIClient()
         user_model = get_user_model()
         self.user = user_model.objects.create_user(
             username="telegram-client",
@@ -27,11 +29,14 @@ class TelegramBotTests(TestCase):
             first_name="Sara",
             last_name="Lopez",
             phone_number="573001112233",
+            email="sara@example.com",
+            address="Cra 10 # 20-30, Barranquilla",
         )
         self.client.force_authenticate(self.user)
 
         self.category = Category.objects.create(name="Electrician", slug="electrician")
         self.zone = Zone.objects.create(name="Riomar", city="Barranquilla")
+        self.boston_zone = Zone.objects.create(name="Boston", city="Barranquilla")
         self.technician_user = user_model.objects.create_user(
             username="telegram-tech",
             password="Password123",
@@ -46,6 +51,7 @@ class TelegramBotTests(TestCase):
             response_time_minutes=15,
         )
         self.profile.zones.add(self.zone)
+        self.profile.zones.add(self.boston_zone)
         self.service = Service.objects.create(
             technician=self.profile,
             category=self.category,
@@ -70,6 +76,12 @@ class TelegramBotTests(TestCase):
         self.assertEqual(cancel_intent["accion"], "cancelar")
         self.assertEqual(reschedule_intent["accion"], "reagendar")
 
+    def test_extract_intent_start_command_is_deterministic(self):
+        start_intent = extract_intent("/START")
+
+        self.assertEqual(start_intent["accion"], "saludo")
+        self.assertEqual(start_intent["provider"], "rules")
+
     def test_initial_message_returns_recommendations(self):
         response = self._send_message("Necesito un electricista urgente en Riomar")
 
@@ -78,6 +90,59 @@ class TelegramBotTests(TestCase):
         self.assertEqual(body["step"], "waiting_technician_selection")
         self.assertIn("Tecnicos disponibles", body["reply"])
         self.assertIn("Carlos Mendoza", body["reply"])
+        self.assertIn("Escribe INICIO para volver al principio.", body["reply"])
+
+    def test_missing_zone_asks_for_free_text_neighborhood(self):
+        response = self._send_message("Necesito un electricista")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["step"], "waiting_zone")
+        self.assertIn("Escribeme el barrio", body["reply"])
+        self.assertNotIn("1. Riomar", body["reply"])
+
+    def test_free_text_neighborhood_continues_booking_flow(self):
+        first_response = self._send_message("Necesito un electricista")
+        self.assertEqual(first_response.json()["step"], "waiting_zone")
+
+        zone_response = self._send_message("Boston")
+
+        self.assertEqual(zone_response.status_code, 200)
+        self.assertEqual(zone_response.json()["step"], "waiting_technician_selection")
+        self.assertIn("Tecnicos disponibles", zone_response.json()["reply"])
+
+    def test_numeric_text_is_not_accepted_as_neighborhood(self):
+        first_response = self._send_message("Necesito un electricista")
+        self.assertEqual(first_response.json()["step"], "waiting_zone")
+
+        zone_response = self._send_message("2")
+
+        self.assertEqual(zone_response.status_code, 200)
+        self.assertEqual(zone_response.json()["step"], "waiting_zone")
+        self.assertIn("No encontre ese barrio", zone_response.json()["reply"])
+        self.assertNotIn("Alto Prado", zone_response.json()["reply"])
+
+    def test_reset_command_returns_to_start_from_any_step(self):
+        first_response = self._send_message("Necesito un electricista")
+        self.assertEqual(first_response.json()["step"], "waiting_zone")
+
+        reset_response = self._send_message("inicio")
+
+        self.assertEqual(reset_response.status_code, 200)
+        self.assertEqual(reset_response.json()["step"], "initial")
+        self.assertIn("Hola, soy el asistente de SubasTech.", reset_response.json()["reply"])
+        self.assertIn("Escribe INICIO para volver al principio.", reset_response.json()["reply"])
+
+    def test_reset_command_also_works_from_technician_selection_step(self):
+        first_response = self._send_message("Necesito un electricista en Riomar")
+        self.assertEqual(first_response.json()["step"], "waiting_technician_selection")
+        self.assertIn("Escribe INICIO para volver al principio.", first_response.json()["reply"])
+
+        reset_response = self._send_message("inicio")
+
+        self.assertEqual(reset_response.status_code, 200)
+        self.assertEqual(reset_response.json()["step"], "initial")
+        self.assertIn("Hola, soy el asistente de SubasTech.", reset_response.json()["reply"])
 
     def test_history_persists_full_conversation(self):
         self._send_message("hola")
@@ -101,6 +166,7 @@ class TelegramBotTests(TestCase):
         self.assertEqual(selection_response.status_code, 200)
         self.assertEqual(selection_response.json()["step"], "waiting_slot_selection")
         self.assertIn("Horarios disponibles", selection_response.json()["reply"])
+        self.assertNotIn("En que zona", selection_response.json()["reply"])
 
         booking_response = self._send_message("1")
 
@@ -129,13 +195,110 @@ class TelegramBotTests(TestCase):
             ).exists()
         )
 
+    def test_recommendation_can_create_auction_instead_of_direct_booking(self):
+        first_response = self._send_message("Necesito un electricista en Riomar")
+        self.assertEqual(first_response.json()["step"], "waiting_technician_selection")
+        self.assertIn("0 para crear una subasta", first_response.json()["reply"])
+
+        auction_response = self._send_message("0")
+
+        self.assertEqual(auction_response.status_code, 200)
+        self.assertEqual(auction_response.json()["step"], "initial")
+        self.assertIn("Subasta creada", auction_response.json()["reply"])
+        self.assertIn("http://localhost:3000/login?telegram_chat_id=101", auction_response.json()["reply"])
+        self.assertEqual(Auction.objects.count(), 1)
+        self.assertEqual(Appointment.objects.count(), 0)
+        self.assertEqual(ServiceLead.objects.count(), 0)
+        auction = Auction.objects.select_related("client", "category", "zone").get()
+        self.assertEqual(auction.client, self.user)
+        self.assertEqual(auction.category, self.category)
+        self.assertEqual(auction.zone, self.zone)
+        self.assertEqual(auction.source, Auction.Source.TELEGRAM)
+        self.assertEqual(auction.metadata["chat_id"], 101)
+
+    def test_link_user_claims_anonymous_telegram_auction(self):
+        first_response = self._send_webhook_message("Necesito un electricista en Riomar", chat_id=404)
+        self.assertIn("Tecnicos disponibles", first_response.json()["reply"])
+        auction_response = self._send_webhook_message("0", chat_id=404)
+        self.assertIn("Subasta creada", auction_response.json()["reply"])
+        anonymous_user = ChatSession.objects.get(chat_id=404).user
+        self.assertIsNotNone(anonymous_user)
+        self.assertNotEqual(anonymous_user, self.user)
+        self.assertEqual(Auction.objects.get().client, anonymous_user)
+
+        link_response = self.client.post("/api/chatbot/link-user/", {"chat_id": 404}, format="json")
+
+        self.assertEqual(link_response.status_code, 200)
+        self.assertEqual(link_response.json()["user"], self.user.username)
+        session = ChatSession.objects.get(chat_id=404)
+        anonymous_user.refresh_from_db()
+        self.user.refresh_from_db()
+        self.assertEqual(session.user, self.user)
+        self.assertIsNone(anonymous_user.telegram_chat_id)
+        self.assertEqual(self.user.telegram_chat_id, "404")
+        self.assertEqual(Auction.objects.get().client, self.user)
+
+        auctions_response = self.client.get("/api/auctions/")
+        self.assertEqual(auctions_response.status_code, 200)
+        self.assertEqual(len(auctions_response.json()), 1)
+
+    def test_webhook_collects_client_data_and_auto_creates_booking(self):
+        first_response = self._send_webhook_message("Necesito un electricista en Riomar", chat_id=202)
+        self.assertTrue(first_response.json()["ok"])
+        self.assertIn("Tecnicos disponibles", first_response.json()["reply"])
+
+        second_response = self._send_webhook_message("1", chat_id=202)
+        self.assertIn("Horarios disponibles", second_response.json()["reply"])
+
+        third_response = self._send_webhook_message("1", chat_id=202)
+        self.assertIn("nombre completo", third_response.json()["reply"].lower())
+        session = ChatSession.objects.get(chat_id=202)
+        self.assertEqual(session.current_step, "waiting_contact_name")
+
+        self._send_webhook_message("Laura Diaz", chat_id=202)
+        session.refresh_from_db()
+        self.assertEqual(session.current_step, "waiting_contact_phone")
+
+        self._send_webhook_message("3001234567", chat_id=202)
+        session.refresh_from_db()
+        self.assertEqual(session.current_step, "waiting_contact_email")
+
+        self._send_webhook_message("laura@example.com", chat_id=202)
+        session.refresh_from_db()
+        self.assertEqual(session.current_step, "waiting_contact_address")
+
+        final_response = self._send_webhook_message("Calle 84 # 50-10, Barranquilla", chat_id=202)
+
+        self.assertIn("Cita agendada", final_response.json()["reply"])
+        session.refresh_from_db()
+        self.assertEqual(session.current_step, "initial")
+        self.assertIsNotNone(session.user)
+        self.assertEqual(session.user.telegram_chat_id, "202")
+        self.assertEqual(session.user.email, "laura@example.com")
+        self.assertEqual(session.user.address, "Calle 84 # 50-10, Barranquilla")
+        self.assertEqual(Appointment.objects.count(), 1)
+        self.assertEqual(ServiceLead.objects.count(), 1)
+
+    def test_webhook_ignores_duplicate_telegram_message_id(self):
+        first_response = self._send_webhook_message("Necesito un electricista en Riomar", chat_id=303, message_id=11)
+        duplicate_response = self._send_webhook_message("Necesito un electricista en Riomar", chat_id=303, message_id=11)
+
+        self.assertTrue(first_response.json()["ok"])
+        self.assertTrue(duplicate_response.json()["ok"])
+        self.assertEqual(duplicate_response.json()["ignored"], "duplicate_message")
+        session = ChatSession.objects.get(chat_id=303)
+        inbound_count = session.messages.filter(direction=ConversationMessage.Direction.INBOUND).count()
+        outbound_count = session.messages.filter(direction=ConversationMessage.Direction.OUTBOUND).count()
+        self.assertEqual(inbound_count, 1)
+        self.assertEqual(outbound_count, 1)
+
     def test_cancel_from_chat_cancels_upcoming_appointment(self):
         appointment = self._create_appointment(9, 10)
 
         start_response = self._send_message("Quiero cancelar mi cita")
         self.assertEqual(start_response.status_code, 200)
         self.assertEqual(start_response.json()["step"], "waiting_cancel_confirm")
-        self.assertIn("¿Confirmas la cancelacion?", start_response.json()["reply"])
+        self.assertIn("Confirmas la cancelacion?", start_response.json()["reply"])
 
         confirm_response = self._send_message("SI")
 
@@ -169,6 +332,16 @@ class TelegramBotTests(TestCase):
         return self.client.post(
             "/api/chatbot/message/",
             {"chat_id": chat_id, "text": text},
+            format="json",
+        )
+
+    def _send_webhook_message(self, text: str, chat_id: int = 101, message_id: int | None = None):
+        message = {"chat": {"id": chat_id}, "text": text}
+        if message_id is not None:
+            message["message_id"] = message_id
+        return self.webhook_client.post(
+            "/api/telegram/webhook/",
+            {"message": message},
             format="json",
         )
 

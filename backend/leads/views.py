@@ -18,7 +18,12 @@ class TechnicianLeadViewSet(viewsets.ReadOnlyModelViewSet):
         profile = getattr(self.request.user, "technician_profile", None)
         if not profile:
             return ServiceLead.objects.none()
-        return ServiceLead.objects.filter(technician=profile).select_related("technician__user", "service")
+        return ServiceLead.objects.filter(technician=profile).select_related(
+            "technician__user",
+            "service",
+            "appointment__client",
+            "appointment__service",
+        )
 
     @action(detail=True, methods=["post"])
     def status(self, request, pk=None):

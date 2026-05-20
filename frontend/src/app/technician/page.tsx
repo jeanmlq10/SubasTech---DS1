@@ -1,5 +1,5 @@
-import { TechnicianDashboard } from "@/components/technician-dashboard";
+import { TechnicianOnboarding } from "@/components/technician-onboarding";
 
 export default function TechnicianPage() {
-  return <TechnicianDashboard />;
+  return <TechnicianOnboarding />;
 }

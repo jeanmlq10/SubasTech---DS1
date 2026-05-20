@@ -6,7 +6,7 @@ import { Home, LogIn, Scale, ShieldCheck, Wrench } from "lucide-react";
 
 const links = [
   { href: "/", label: "Inicio", icon: Home },
-  { href: "/technician", label: "Tecnico", icon: Wrench },
+  { href: "/technician/dashboard", label: "Tecnico", icon: Wrench },
   { href: "/admin", label: "Admin", icon: ShieldCheck },
   { href: "/arbiter", label: "Arbitro", icon: Scale },
   { href: "/login", label: "Login", icon: LogIn },
@@ -20,7 +20,7 @@ export function MobileRoleNav() {
       <div className="grid grid-cols-5 gap-1">
         {links.map((link) => {
           const Icon = link.icon;
-          const active = pathname === link.href;
+          const active = pathname === link.href || (link.href === "/technician/dashboard" && pathname.startsWith("/technician"));
           return (
             <Link
               key={link.href}

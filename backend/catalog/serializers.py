@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from accounts.serializers import UserSerializer
-from .models import Category, Service, ServicePhoto, TechnicianAvailability, TechnicianProfile, Zone
+from .models import Category, Service, ServicePhoto, TechnicianAvailability, TechnicianDocument, TechnicianProfile, Zone
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -34,10 +34,47 @@ class ServicePhotoSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "created_at"]
 
 
+class TechnicianDocumentSerializer(serializers.ModelSerializer):
+    technician_name = serializers.SerializerMethodField()
+    reviewed_by_username = serializers.CharField(source="reviewed_by.username", read_only=True)
+
+    class Meta:
+        model = TechnicianDocument
+        fields = [
+            "id",
+            "technician",
+            "technician_name",
+            "document_type",
+            "file",
+            "notes",
+            "review_status",
+            "admin_notes",
+            "reviewed_by",
+            "reviewed_by_username",
+            "reviewed_at",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "technician",
+            "technician_name",
+            "reviewed_by",
+            "reviewed_by_username",
+            "reviewed_at",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_technician_name(self, obj):
+        return obj.technician.user.get_full_name() or obj.technician.user.username
+
+
 class TechnicianProfileSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
     zone_ids = serializers.PrimaryKeyRelatedField(source="zones", queryset=Zone.objects.all(), many=True, write_only=True, required=False)
     zones = ZoneSerializer(many=True, read_only=True)
+    documents = TechnicianDocumentSerializer(many=True, read_only=True)
 
     class Meta:
         model = TechnicianProfile
@@ -52,6 +89,7 @@ class TechnicianProfileSerializer(serializers.ModelSerializer):
             "service_completion_rate",
             "zones",
             "zone_ids",
+            "documents",
             "created_at",
             "updated_at",
         ]

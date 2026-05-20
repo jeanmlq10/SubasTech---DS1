@@ -692,7 +692,7 @@ def _lock_appointment(appointment_id: int) -> Appointment:
     of the transition.
     """
     return (
-        Appointment.objects.select_for_update()
+        Appointment.objects.select_for_update(of=("self",))
         .select_related("technician__user", "client", "service", "lead")
         .get(pk=appointment_id)
     )

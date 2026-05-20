@@ -3,16 +3,18 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from rest_framework_simplejwt.views import TokenRefreshView
 
 from audit.views import AuditEventViewSet
-from accounts.views import MeAPIView, RegisterAPIView
+from accounts.views import EmailOrUsernameTokenObtainPairView, MeAPIView, RegisterAPIView
 from adminpanel.views import AdminSummaryAPIView, AdminTechnicianActionAPIView
 from appointments.views import AppointmentViewSet, TechnicianAvailableSlotsAPIView
+from auctions.views import AuctionViewSet, BidViewSet
 from catalog.views import (
     CategoryViewSet,
     ServiceViewSet,
     TechnicianOnboardingAPIView,
+    TechnicianDocumentViewSet,
     TechnicianProfileViewSet,
     TechnicianServicePhotoViewSet,
     TechnicianServiceViewSet,
@@ -30,10 +32,13 @@ router = DefaultRouter()
 router.register("categories", CategoryViewSet)
 router.register("zones", ZoneViewSet)
 router.register("audit/events", AuditEventViewSet, basename="audit-events")
+router.register("auctions", AuctionViewSet, basename="auctions")
+router.register("auction-bids", BidViewSet, basename="auction-bids")
 router.register("technicians", TechnicianProfileViewSet)
 router.register("services", ServiceViewSet)
 router.register("technician/services", TechnicianServiceViewSet, basename="technician-services")
 router.register("technician/service-photos", TechnicianServicePhotoViewSet, basename="technician-service-photos")
+router.register("technician/documents", TechnicianDocumentViewSet, basename="technician-documents")
 router.register("technician/leads", TechnicianLeadViewSet, basename="technician-leads")
 router.register("ratings", RatingViewSet)
 router.register("penalties", PenaltyViewSet)
@@ -45,7 +50,7 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/auth/register/", RegisterAPIView.as_view(), name="register"),
     path("api/auth/me/", MeAPIView.as_view(), name="me"),
-    path("api/auth/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
+    path("api/auth/token/", EmailOrUsernameTokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("api/auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("api/health/", HealthAPIView.as_view(), name="health"),
     path("api/admin/summary/", AdminSummaryAPIView.as_view(), name="admin_summary"),

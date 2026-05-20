@@ -71,6 +71,41 @@ class TechnicianProfile(models.Model):
         return self.user.get_full_name() or self.user.username
 
 
+class TechnicianDocument(models.Model):
+    class DocumentType(models.TextChoices):
+        IDENTITY = "identity", "Identity"
+        CERTIFICATION = "certification", "Certification"
+        OTHER = "other", "Other"
+
+    class ReviewStatus(models.TextChoices):
+        PENDING = "pending", "Pending"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+
+    technician = models.ForeignKey(TechnicianProfile, on_delete=models.CASCADE, related_name="documents")
+    document_type = models.CharField(max_length=32, choices=DocumentType.choices)
+    file = models.FileField(upload_to="technician-documents/")
+    notes = models.TextField(blank=True)
+    review_status = models.CharField(max_length=20, choices=ReviewStatus.choices, default=ReviewStatus.PENDING)
+    admin_notes = models.TextField(blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_technician_documents",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"{self.technician} - {self.document_type} ({self.review_status})"
+
+
 class Service(models.Model):
     technician = models.ForeignKey(TechnicianProfile, on_delete=models.CASCADE, related_name="services")
     category = models.ForeignKey(Category, on_delete=models.PROTECT, related_name="services")

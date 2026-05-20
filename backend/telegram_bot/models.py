@@ -28,6 +28,7 @@ class ChatSession(models.Model):
     )
     current_step = models.CharField(max_length=50, default="initial")
     state_data = models.JSONField(default=dict)
+    last_telegram_message_id = models.BigIntegerField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -2,14 +2,21 @@ from datetime import timedelta
 import os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
 from decouple import config as env
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
-SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "dev-only-change-me")
 DEBUG = os.getenv("DJANGO_DEBUG", "True").lower() == "true"
+DEFAULT_DEV_SECRET_KEY = "dev-only-change-me-subastech-local-development-key"
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", DEFAULT_DEV_SECRET_KEY)
+if len(SECRET_KEY) < 32:
+    if DEBUG:
+        SECRET_KEY = DEFAULT_DEV_SECRET_KEY
+    else:
+        raise ImproperlyConfigured("DJANGO_SECRET_KEY must be at least 32 characters long.")
 ALLOWED_HOSTS = [host.strip() for host in os.getenv("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,testserver").split(",") if host.strip()]
 
 INSTALLED_APPS = [
@@ -23,6 +30,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "rest_framework_simplejwt",
     "accounts",
+    "auctions",
     "audit",
     "adminpanel",
     "catalog",
@@ -129,7 +137,11 @@ CORS_ALLOWED_ORIGINS = [
     for origin in os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000").split(",")
     if origin.strip()
 ]
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
 
 TELEGRAM_BOT_TOKEN = env("TELEGRAM_BOT_TOKEN", default="")
-TELEGRAM_DRY_RUN = env("TELEGRAM_DRY_RUN", default="True").lower() == "true"
+TELEGRAM_DRY_RUN = (
+    os.getenv("USE_SQLITE_FOR_TESTS", "False").lower() == "true"
+    or env("TELEGRAM_DRY_RUN", default="True").lower() == "true"
+)
 GEMINI_API_KEY = env("GEMINI_API_KEY", default="")

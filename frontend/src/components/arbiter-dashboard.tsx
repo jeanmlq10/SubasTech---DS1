@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Bot, CheckCircle2, ClipboardCheck, Loader2, RefreshCw, Scale } from "lucide-react";
 
-import { clearStoredAuth, getStoredAuth } from "@/lib/auth";
+import { clearStoredAuth, restoreSession } from "@/lib/auth";
 import { API_URL, ArbiterDispute, ArbiterQueue } from "@/lib/api";
 import { MobileRoleNav } from "@/components/mobile-role-nav";
 import { Badge } from "@/components/ui/badge";
@@ -33,11 +33,19 @@ export function ArbiterDashboard() {
   const [message, setMessage] = useState("Login in /login or use an arbiter JWT token to load disputes.");
 
   useEffect(() => {
-    const session = getStoredAuth();
-    if (session) {
-      setToken(session.accessToken);
-      setMessage(`Sesion activa como ${session.user.username} (${session.user.role}). Puedes sincronizar el panel.`);
-    }
+    let mounted = true;
+
+    void (async () => {
+      const session = await restoreSession();
+      if (mounted && session) {
+        setToken(session.accessToken);
+        setMessage(`Sesion activa como ${session.user.username} (${session.user.role}). Puedes sincronizar el panel.`);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   function logout() {

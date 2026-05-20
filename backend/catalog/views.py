@@ -1,4 +1,5 @@
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import permissions, status, viewsets
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
@@ -11,6 +12,7 @@ from .serializers import (
     CategorySerializer,
     ServicePhotoSerializer,
     ServiceSerializer,
+    TechnicianDocumentSerializer,
     TechnicianProfileSerializer,
     TechnicianServiceSerializer,
     ZoneSerializer,
@@ -119,3 +121,53 @@ class TechnicianServicePhotoViewSet(viewsets.ModelViewSet):
             raise ValidationError({"technician_profile": "Complete technician onboarding before uploading photos."})
         service = get_object_or_404(Service, pk=self.request.data.get("service_id"), technician=profile)
         serializer.save(service=service)
+
+
+class TechnicianDocumentViewSet(viewsets.ModelViewSet):
+    serializer_class = TechnicianDocumentSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        from .models import TechnicianDocument
+
+        queryset = TechnicianDocument.objects.select_related("technician__user", "reviewed_by")
+        user = self.request.user
+        if user.is_staff or user.is_superuser or user.role == User.Role.ADMIN:
+            return queryset
+        profile = getattr(user, "technician_profile", None)
+        if not profile:
+            return TechnicianDocument.objects.none()
+        return queryset.filter(technician=profile)
+
+    def perform_create(self, serializer):
+        profile = getattr(self.request.user, "technician_profile", None)
+        if not profile:
+            raise ValidationError({"technician_profile": "Complete technician onboarding before uploading documents."})
+        serializer.save(
+            technician=profile,
+            review_status="pending",
+            admin_notes="",
+            reviewed_by=None,
+            reviewed_at=None,
+        )
+
+    def perform_update(self, serializer):
+        instance = serializer.instance
+        user = self.request.user
+        is_admin = user.is_staff or user.is_superuser or user.role == User.Role.ADMIN
+
+        if is_admin:
+            serializer.save(reviewed_by=user, reviewed_at=timezone.now())
+            return
+
+        profile = getattr(user, "technician_profile", None)
+        if not profile or instance.technician_id != profile.id:
+            raise PermissionDenied("You can only update your own documents.")
+        if instance.review_status != "rejected":
+            raise PermissionDenied("Only rejected documents can be uploaded again by the technician.")
+        serializer.save(
+            review_status="pending",
+            admin_notes="",
+            reviewed_by=None,
+            reviewed_at=None,
+        )

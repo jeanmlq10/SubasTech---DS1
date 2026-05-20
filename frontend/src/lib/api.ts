@@ -1,4 +1,9 @@
-export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
+function normalizeApiUrl(value: string | undefined): string {
+  const raw = (value ?? "http://localhost:8000/api").trim().replace(/\/+$/, "");
+  return raw.endsWith("/api") ? raw : `${raw}/api`;
+}
+
+export const API_URL = normalizeApiUrl(process.env.NEXT_PUBLIC_API_URL);
 
 export type User = {
   id: number;
@@ -7,7 +12,10 @@ export type User = {
   last_name: string;
   email: string;
   role: "client" | "technician" | "admin" | "arbiter";
+  technician_trade: "electrician" | "plumber" | "locksmith" | "general-handyman" | "";
   phone_number: string;
+  address: string;
+  telegram_chat_id: string | null;
   whatsapp_id: string | null;
 };
 
@@ -47,6 +55,7 @@ export type TechnicianProfile = {
   completed_services: number;
   service_completion_rate: string;
   zones: Zone[];
+  documents: TechnicianDocument[];
 };
 
 export type OnboardingResponse = {
@@ -59,6 +68,7 @@ export type AdminMetrics = {
   total_technicians: number;
   verified_technicians: number;
   pending_verification: number;
+  pending_technician_documents: number;
   suspended_technicians: number;
   active_services: number;
   inactive_services: number;
@@ -87,8 +97,29 @@ export type AdminTechnicianSummary = {
   response_time_minutes: number;
   service_count: number;
   average_rating: number;
+  document_counts: {
+    pending: number;
+    approved: number;
+    rejected: number;
+  };
   zones: string[];
   created_at: string;
+};
+
+export type TechnicianDocument = {
+  id: number;
+  technician: number;
+  technician_name: string;
+  document_type: "identity" | "certification" | "other";
+  file: string;
+  notes: string;
+  review_status: "pending" | "approved" | "rejected";
+  admin_notes: string;
+  reviewed_by: number | null;
+  reviewed_by_username: string;
+  reviewed_at: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export type AdminServiceSummary = {
@@ -191,6 +222,61 @@ export type TechnicianLead = {
   urgency: string;
   source: string;
   status: "new" | "contacted" | "accepted" | "closed";
+  appointment: {
+    id: number;
+    scheduled_start: string;
+    scheduled_end: string;
+    status: "pending" | "confirmed" | "cancelled" | "rescheduled" | "completed" | "no_show";
+    service_title: string;
+    client_username: string;
+    client_address: string;
+    request_text: string;
+    location: string;
+    created_at: string;
+    updated_at: string;
+  } | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AuctionBid = {
+  id: number;
+  auction: number;
+  auction_title: string;
+  technician: number;
+  technician_name: string;
+  service: number | null;
+  service_title: string | null;
+  amount: string;
+  message: string;
+  estimated_minutes: number;
+  available_from: string | null;
+  status: "pending" | "accepted" | "rejected" | "withdrawn";
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Auction = {
+  id: number;
+  client: number;
+  client_username: string;
+  category: number;
+  category_name: string;
+  zone: number | null;
+  zone_name: string | null;
+  title: string;
+  description: string;
+  location: string;
+  urgency: string;
+  budget_min: string | null;
+  budget_max: string | null;
+  status: "open" | "awarded" | "cancelled" | "expired";
+  source: "telegram" | "dashboard";
+  closes_at: string | null;
+  winning_bid: number | null;
+  metadata: Record<string, unknown>;
+  bids: AuctionBid[];
   created_at: string;
   updated_at: string;
 };
