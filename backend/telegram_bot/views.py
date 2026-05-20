@@ -351,6 +351,10 @@ def handle_conversation(session: ChatSession, text: str, intent: dict) -> str:
         return _handle_zone_selection(session, cleaned_text, state)
     if step == "waiting_technician_selection":
         return _handle_technician_selection(session, cleaned_text, state)
+    if step == "waiting_auction_name":
+        return _handle_auction_name(session, cleaned_text, state)
+    if step == "waiting_auction_phone":
+        return _handle_auction_phone(session, cleaned_text, state)
     if step == "waiting_auction_address":
         return _handle_auction_address(session, cleaned_text, state)
     if step == "waiting_slot_selection":
@@ -541,16 +545,67 @@ def _handle_contact_collection(session: ChatSession, text: str, state: dict, ste
 
 
 def _start_auction_flow(session: ChatSession, state: dict) -> str:
+    user = session.user
+    user_name = (getattr(user, "first_name", "") or "").strip() if user else ""
+    if not user_name:
+        _update_session(session, step="waiting_auction_name", state_data=state)
+        return "Antes de crear la subasta, necesito tu nombre completo."
+    user_phone = (getattr(user, "phone_number", "") or "").strip() if user else ""
+    if not user_phone:
+        _update_session(session, step="waiting_auction_phone", state_data=state)
+    user_address = (getattr(user, "address", "") or "").strip() if user else ""
+    if not user_address:
+        _update_session(session, step="waiting_auction_address", state_data=state)
+        return (
+            "Para que el tecnico pueda llegar, necesito la direccion del servicio.\n"
+            "Escribeme la calle, barrio o una referencia clara, por ejemplo: Cra 50 #80-45 Riomar."
+        )
+    updated_state = dict(state)
+    updated_state["auction_address"] = user_address
+    return _create_auction_from_chat(session, updated_state)
+
+
+def _handle_auction_name(session: ChatSession, text: str, state: dict) -> str:
+    if len(text.strip().split()) < 2:
+        return "Necesito tu nombre y apellido para continuar."
+    if session.user:
+        first_name, last_name = text.strip().split(" ", 1)
+        session.user.first_name = first_name
+        session.user.last_name = last_name
+        session.user.save(update_fields=["first_name", "last_name"])
+    user_phone = (getattr(session.user, "phone_number", "") or "").strip() if session.user else ""
+    if not user_phone:
+        _update_session(session, step="waiting_auction_phone", state_data=state)
+        return "Cual es tu numero de celular?"
     user_address = (getattr(session.user, "address", "") or "").strip() if session.user else ""
-    if user_address:
-        updated_state = dict(state)
-        updated_state["auction_address"] = user_address
-        return _create_auction_from_chat(session, updated_state)
-    _update_session(session, step="waiting_auction_address", state_data=state)
-    return (
-        "Para que el tecnico pueda llegar, necesito la direccion del servicio.\n"
-        "Escribeme la calle, barrio o una referencia clara, por ejemplo: Cra 50 #80-45 Riomar."
-    )
+    if not user_address:
+        _update_session(session, step="waiting_auction_address", state_data=state)
+        return (
+            "Para que el tecnico pueda llegar, necesito la direccion del servicio.\n"
+            "Escribeme la calle, barrio o una referencia clara, por ejemplo: Cra 50 #80-45 Riomar."
+        )
+    updated_state = dict(state)
+    updated_state["auction_address"] = user_address
+    return _create_auction_from_chat(session, updated_state)
+
+
+def _handle_auction_phone(session: ChatSession, text: str, state: dict) -> str:
+    digits = re.sub(r"\D", "", text.strip())
+    if len(digits) < 10 or len(digits) > 15:
+        return "Comparte un numero de celular valido, por ejemplo 3001234567 o 573001234567."
+    if session.user:
+        session.user.phone_number = digits
+        session.user.save(update_fields=["phone_number"])
+    user_address = (getattr(session.user, "address", "") or "").strip() if session.user else ""
+    if not user_address:
+        _update_session(session, step="waiting_auction_address", state_data=state)
+        return (
+            "Para que el tecnico pueda llegar, necesito la direccion del servicio.\n"
+            "Escribeme la calle, barrio o una referencia clara, por ejemplo: Cra 50 #80-45 Riomar."
+        )
+    updated_state = dict(state)
+    updated_state["auction_address"] = user_address
+    return _create_auction_from_chat(session, updated_state)
 
 
 def _handle_auction_address(session: ChatSession, text: str, state: dict) -> str:
