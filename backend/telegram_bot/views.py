@@ -7,7 +7,9 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.validators import validate_email
+from django.db import transaction
 from django.http import JsonResponse
+from django.utils.text import slugify
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework import status
@@ -62,11 +64,6 @@ CATEGORY_KEYWORDS = {
     "plumber": ("plomero", "agua", "tuberia", "fuga"),
     "locksmith": ("cerrajero", "llave", "cerradura", "puerta"),
     "general-handyman": ("mantenimiento", "reparacion", "arreglo"),
-}
-ZONE_CHOICES = {
-    "1": "barranquilla-riomar",
-    "2": "barranquilla-alto-prado",
-    "3": "barranquilla-villa-santos",
 }
 ZONE_DISPLAY_NAMES = {
     "barranquilla-riomar": "Riomar",
@@ -132,29 +129,51 @@ def _reset_session(session: ChatSession) -> None:
     _update_session(session, step="initial", state_data={})
 
 
-def _process_chat_message(chat_id: int, text: str, *, user=None) -> tuple[ChatSession, dict, str]:
-    session = _get_session(chat_id)
-    if user is not None and session.user_id != user.id:
-        session.user = user
-        session.save(update_fields=["user", "updated_at"])
+def _process_chat_message(
+    chat_id: int,
+    text: str,
+    *,
+    user=None,
+    telegram_message_id: int | None = None,
+) -> tuple[ChatSession, dict, str, bool]:
+    with transaction.atomic():
+        session = _get_session(chat_id)
+        session = ChatSession.objects.select_for_update().get(pk=session.pk)
 
-    intent = extract_intent(text)
-    _save_inbound(session, text, intent)
-    reply = handle_conversation(session, text, intent)
-    _save_outbound(session, reply)
-    log_audit_event(
-        event_type=AuditEvent.EventType.MESSAGE_SENT,
-        actor=session.user,
-        channel="telegram",
-        source="telegram_bot.chat",
-        entity_type="chat_session",
-        entity_id=str(session.chat_id),
-        status="success",
-        message="Telegram chatbot reply generated",
-        metadata={"step": session.current_step, "reply": reply},
-    )
-    session.refresh_from_db()
-    return session, intent, reply
+        if user is not None and session.user_id != user.id:
+            session.user = user
+            session.save(update_fields=["user", "updated_at"])
+
+        if _is_duplicate_telegram_message(session, telegram_message_id):
+            return session, {}, "", False
+
+        intent = extract_intent(text)
+        _save_inbound(session, text, intent)
+        reply = handle_conversation(session, text, intent)
+        _save_outbound(session, reply)
+        if telegram_message_id is not None:
+            session.last_telegram_message_id = telegram_message_id
+            session.save(update_fields=["last_telegram_message_id", "updated_at"])
+        log_audit_event(
+            event_type=AuditEvent.EventType.MESSAGE_SENT,
+            actor=session.user,
+            channel="telegram",
+            source="telegram_bot.chat",
+            entity_type="chat_session",
+            entity_id=str(session.chat_id),
+            status="success",
+            message="Telegram chatbot reply generated",
+            metadata={"step": session.current_step, "reply": reply},
+        )
+        session.refresh_from_db()
+        return session, intent, reply, True
+
+
+def _is_duplicate_telegram_message(session: ChatSession, telegram_message_id: int | None) -> bool:
+    if telegram_message_id is None:
+        return False
+    last_message_id = session.last_telegram_message_id
+    return last_message_id is not None and telegram_message_id <= last_message_id
 
 
 @csrf_exempt
@@ -164,6 +183,7 @@ def telegram_webhook(request):
             data = json.loads(request.body)
             message = data.get("message", {})
             chat_id = message.get("chat", {}).get("id")
+            message_id = message.get("message_id")
             text = (message.get("text") or "").strip()
             if not chat_id or not text:
                 return JsonResponse({"ok": True})
@@ -180,7 +200,13 @@ def telegram_webhook(request):
                 message="Telegram webhook received",
                 metadata={"text": text},
             )
-            session, intent, reply = _process_chat_message(int(chat_id), text)
+            session, intent, reply, processed = _process_chat_message(
+                int(chat_id),
+                text,
+                telegram_message_id=message_id,
+            )
+            if not processed:
+                return JsonResponse({"ok": True, "chat_id": chat_id, "ignored": "duplicate_message"})
 
             if not settings.TELEGRAM_DRY_RUN:
                 send_telegram_message(chat_id, reply)
@@ -214,7 +240,7 @@ def chatbot_message(request):
     except (TypeError, ValueError):
         return Response({"detail": "chat_id must be an integer"}, status=status.HTTP_400_BAD_REQUEST)
 
-    session, intent, reply = _process_chat_message(chat_id, text, user=request.user)
+    session, intent, reply, _processed = _process_chat_message(chat_id, text, user=request.user)
     return Response({"reply": reply, "intent": intent, "step": session.current_step})
 
 
@@ -271,7 +297,7 @@ def handle_conversation(session: ChatSession, text: str, intent: dict) -> str:
     lowered = cleaned_text.lower()
     accion = (intent.get("accion") or "").lower()
 
-    if cleaned_text in CATEGORY_CHOICES and step != "waiting_zone":
+    if cleaned_text in CATEGORY_CHOICES and step in {"initial", "waiting_category"}:
         intent = {"accion": "agendar", "categoria": CATEGORY_CHOICES[cleaned_text], "zona": None}
         accion = "agendar"
 
@@ -337,7 +363,7 @@ def _start_booking_flow(session: ChatSession, text: str, intent: dict) -> str:
         )
         return (
             f"En que zona necesitas el servicio de {CATEGORY_DISPLAY_NAMES.get(category, category)}?\n"
-            "1. Riomar\n2. Alto Prado\n3. Villa Santos"
+            "Escribeme el barrio, por ejemplo: Riomar, Boston, El Prado, Villa Santos o La Pradera."
         )
 
     recommendations = _recommend_technicians(category, location)
@@ -359,18 +385,13 @@ def _start_booking_flow(session: ChatSession, text: str, intent: dict) -> str:
 
 
 def _handle_zone_selection(session: ChatSession, text: str, state: dict) -> str:
-    selected_zone = None
-    if text in ZONE_CHOICES:
-        selected_zone = ZONE_CHOICES[text]
-    else:
-        lowered = text.lower()
-        for zone_slug, keywords in ZONE_KEYWORDS.items():
-            if any(keyword in lowered for keyword in keywords):
-                selected_zone = zone_slug
-                break
+    selected_zone = _resolve_zone_text(text)
 
     if not selected_zone:
-        return "Responde con un numero (1-3) o una zona valida:\n1. Riomar\n2. Alto Prado\n3. Villa Santos"
+        return (
+            "No encontre ese barrio en nuestra cobertura.\n"
+            "Escribelo de nuevo sin direccion completa, por ejemplo: Riomar, Boston, El Prado, Villa Santos o La Pradera."
+        )
 
     category = state.get("categoria")
     recommendations = _recommend_technicians(category, selected_zone)
@@ -843,16 +864,42 @@ def _extract_category(intent: dict, text: str) -> str | None:
 def _extract_zone(intent: dict, text: str) -> str | None:
     zone = intent.get("zona")
     if zone:
-        zone_lower = str(zone).strip().lower()
-        for zone_slug, keywords in ZONE_KEYWORDS.items():
-            if zone_lower in keywords or zone_lower == zone_slug:
-                return zone_slug
-        return zone_lower
+        resolved_zone = _resolve_zone_text(str(zone))
+        return resolved_zone or str(zone).strip().lower()
 
-    lowered = (text or "").strip().lower()
+    return _resolve_zone_text(text)
+
+
+def _resolve_zone_text(value: str | None) -> str | None:
+    if not value:
+        return None
+
+    cleaned = str(value).strip()
+    if not cleaned:
+        return None
+
+    lowered = cleaned.lower()
     for zone_slug, keywords in ZONE_KEYWORDS.items():
-        if any(keyword in lowered for keyword in keywords):
+        if lowered == zone_slug or any(keyword == lowered or keyword in lowered for keyword in keywords):
             return zone_slug
+
+    normalized_slug = slugify(f"Barranquilla-{cleaned}")
+    zone = Zone.objects.filter(slug__iexact=normalized_slug, is_active=True).first()
+    if zone is not None:
+        return zone.slug
+
+    zone = Zone.objects.filter(slug__iexact=cleaned, is_active=True).first()
+    if zone is not None:
+        return zone.slug
+
+    zone = Zone.objects.filter(name__iexact=cleaned, is_active=True).first()
+    if zone is not None:
+        return zone.slug
+
+    zone = Zone.objects.filter(name__icontains=cleaned, is_active=True).first()
+    if zone is not None:
+        return zone.slug
+
     return None
 
 

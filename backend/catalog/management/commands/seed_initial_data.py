@@ -37,8 +37,8 @@ CATEGORIES = [
     },
 ]
 
-def zone(name: str, city: str = "Barranquilla") -> dict:
-    return {"name": name, "slug": slugify(f"{city}-{name}"), "city": city}
+def zone(name: str, city: str = "Barranquilla", slug: str | None = None) -> dict:
+    return {"name": name, "slug": slug or slugify(f"{city}-{name}"), "city": city}
 
 
 # Official neighborhood lists by Barranquilla locality, sourced from the
@@ -254,7 +254,7 @@ ZONES = [
     *(zone(name) for name in METROPOLITANA_ZONES),
     *(zone(name) for name in SURORIENTE_ZONES),
     *(zone(name) for name in SUROCCIDENTE_ZONES),
-    zone("Soledad", "Soledad"),
+    zone("Soledad", "Soledad", slug="soledad"),
 ]
 
 
@@ -276,12 +276,12 @@ class Command(BaseCommand):
             )
             category_count += int(created)
 
-        for zone in ZONES:
+        for zone_data in ZONES:
             _obj, created = Zone.objects.update_or_create(
-                slug=zone["slug"],
+                name=zone_data["name"],
+                city=zone_data["city"],
                 defaults={
-                    "name": zone["name"],
-                    "city": zone["city"],
+                    "slug": zone_data["slug"],
                     "is_active": True,
                 },
             )

@@ -35,6 +35,7 @@ class TelegramBotTests(TestCase):
 
         self.category = Category.objects.create(name="Electrician", slug="electrician")
         self.zone = Zone.objects.create(name="Riomar", city="Barranquilla")
+        self.boston_zone = Zone.objects.create(name="Boston", city="Barranquilla")
         self.technician_user = user_model.objects.create_user(
             username="telegram-tech",
             password="Password123",
@@ -49,6 +50,7 @@ class TelegramBotTests(TestCase):
             response_time_minutes=15,
         )
         self.profile.zones.add(self.zone)
+        self.profile.zones.add(self.boston_zone)
         self.service = Service.objects.create(
             technician=self.profile,
             category=self.category,
@@ -82,6 +84,36 @@ class TelegramBotTests(TestCase):
         self.assertIn("Tecnicos disponibles", body["reply"])
         self.assertIn("Carlos Mendoza", body["reply"])
 
+    def test_missing_zone_asks_for_free_text_neighborhood(self):
+        response = self._send_message("Necesito un electricista")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["step"], "waiting_zone")
+        self.assertIn("Escribeme el barrio", body["reply"])
+        self.assertNotIn("1. Riomar", body["reply"])
+
+    def test_free_text_neighborhood_continues_booking_flow(self):
+        first_response = self._send_message("Necesito un electricista")
+        self.assertEqual(first_response.json()["step"], "waiting_zone")
+
+        zone_response = self._send_message("Boston")
+
+        self.assertEqual(zone_response.status_code, 200)
+        self.assertEqual(zone_response.json()["step"], "waiting_technician_selection")
+        self.assertIn("Tecnicos disponibles", zone_response.json()["reply"])
+
+    def test_numeric_text_is_not_accepted_as_neighborhood(self):
+        first_response = self._send_message("Necesito un electricista")
+        self.assertEqual(first_response.json()["step"], "waiting_zone")
+
+        zone_response = self._send_message("2")
+
+        self.assertEqual(zone_response.status_code, 200)
+        self.assertEqual(zone_response.json()["step"], "waiting_zone")
+        self.assertIn("No encontre ese barrio", zone_response.json()["reply"])
+        self.assertNotIn("Alto Prado", zone_response.json()["reply"])
+
     def test_history_persists_full_conversation(self):
         self._send_message("hola")
         self._send_message("Necesito un electricista en Riomar")
@@ -104,6 +136,7 @@ class TelegramBotTests(TestCase):
         self.assertEqual(selection_response.status_code, 200)
         self.assertEqual(selection_response.json()["step"], "waiting_slot_selection")
         self.assertIn("Horarios disponibles", selection_response.json()["reply"])
+        self.assertNotIn("En que zona", selection_response.json()["reply"])
 
         booking_response = self._send_message("1")
 
@@ -169,6 +202,19 @@ class TelegramBotTests(TestCase):
         self.assertEqual(Appointment.objects.count(), 1)
         self.assertEqual(ServiceLead.objects.count(), 1)
 
+    def test_webhook_ignores_duplicate_telegram_message_id(self):
+        first_response = self._send_webhook_message("Necesito un electricista en Riomar", chat_id=303, message_id=11)
+        duplicate_response = self._send_webhook_message("Necesito un electricista en Riomar", chat_id=303, message_id=11)
+
+        self.assertTrue(first_response.json()["ok"])
+        self.assertTrue(duplicate_response.json()["ok"])
+        self.assertEqual(duplicate_response.json()["ignored"], "duplicate_message")
+        session = ChatSession.objects.get(chat_id=303)
+        inbound_count = session.messages.filter(direction=ConversationMessage.Direction.INBOUND).count()
+        outbound_count = session.messages.filter(direction=ConversationMessage.Direction.OUTBOUND).count()
+        self.assertEqual(inbound_count, 1)
+        self.assertEqual(outbound_count, 1)
+
     def test_cancel_from_chat_cancels_upcoming_appointment(self):
         appointment = self._create_appointment(9, 10)
 
@@ -212,10 +258,13 @@ class TelegramBotTests(TestCase):
             format="json",
         )
 
-    def _send_webhook_message(self, text: str, chat_id: int = 101):
+    def _send_webhook_message(self, text: str, chat_id: int = 101, message_id: int | None = None):
+        message = {"chat": {"id": chat_id}, "text": text}
+        if message_id is not None:
+            message["message_id"] = message_id
         return self.webhook_client.post(
             "/api/telegram/webhook/",
-            {"message": {"chat": {"id": chat_id}, "text": text}},
+            {"message": message},
             format="json",
         )
 

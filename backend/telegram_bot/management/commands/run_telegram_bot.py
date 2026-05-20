@@ -26,9 +26,15 @@ class Command(BaseCommand):
                     message = update.get("message", {})
                     chat_id = message.get("chat", {}).get("id")
                     text = message.get("text", "")
+                    message_id = message.get("message_id")
                     if chat_id and text:
-                        _session, _intent, reply = _process_chat_message(int(chat_id), text)
-                        send_telegram_message(chat_id, reply)
+                        _session, _intent, reply, processed = _process_chat_message(
+                            int(chat_id),
+                            text,
+                            telegram_message_id=message_id,
+                        )
+                        if processed:
+                            send_telegram_message(chat_id, reply)
             except Exception as e:
                 logger.error(f"Error en polling: {e}")
                 time.sleep(5)
