@@ -165,3 +165,15 @@ export async function restoreSession(): Promise<AuthSession | null> {
     }
   }
 }
+
+export async function linkTelegramChat(accessToken: string, chatId: string): Promise<void> {
+  const response = await fetch(`${API_URL}/chatbot/link-user/`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: Number(chatId) }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Could not link Telegram chat");
+  }
+}

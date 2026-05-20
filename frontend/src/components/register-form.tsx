@@ -1,11 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { Loader2, UserPlus } from "lucide-react";
 
-import { loginWithPassword, registerUser, roleHome } from "@/lib/auth";
+import { linkTelegramChat, loginWithPassword, registerUser, roleHome } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,6 +19,8 @@ const TECHNICIAN_PROFESSIONS = [
 
 export function RegisterForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const telegramChatId = searchParams.get("telegram_chat_id");
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -49,6 +51,9 @@ export function RegisterForm() {
         technician_trade: isTechnician ? (technicianProfession as "electrician" | "plumber" | "locksmith" | "general-handyman") : undefined,
       });
       const session = await loginWithPassword(username, password);
+      if (telegramChatId && session.user.role === "client") {
+        await linkTelegramChat(session.accessToken, telegramChatId);
+      }
       router.push(roleHome(session.user.role));
     } catch (error) {
       const detail = error instanceof Error ? error.message : "No se pudo completar el registro.";
@@ -178,7 +183,7 @@ export function RegisterForm() {
             <div className="mt-6 border-t border-white/10 pt-4 text-center text-xs text-purple-200">
               <p>
                 ¿Ya tienes cuenta?{" "}
-                <Link href="/login" className="text-orange-400 hover:text-orange-300">
+                <Link href={telegramChatId ? `/login?telegram_chat_id=${telegramChatId}` : "/login"} className="text-orange-400 hover:text-orange-300">
                   Inicia sesión
                 </Link>
               </p>

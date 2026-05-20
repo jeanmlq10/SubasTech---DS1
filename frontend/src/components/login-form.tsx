@@ -1,11 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { Loader2, LogIn, MessageCircle, Gauge, Calendar, ClipboardList } from "lucide-react";
 
-import { loginWithPassword, restoreSession, roleHome } from "@/lib/auth";
+import { linkTelegramChat, loginWithPassword, restoreSession, roleHome } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,6 +35,8 @@ const features = [
 
 export function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const telegramChatId = searchParams.get("telegram_chat_id");
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -60,6 +62,9 @@ export function LoginForm() {
     setLoading(true);
     try {
       const session = await loginWithPassword(identifier, password);
+      if (telegramChatId && session.user.role === "client") {
+        await linkTelegramChat(session.accessToken, telegramChatId);
+      }
       router.push(roleHome(session.user.role));
     } catch {
       setMessage("No se pudo iniciar sesion. Revisa correo/usuario, clave y backend.");
@@ -153,7 +158,7 @@ export function LoginForm() {
             <div className="mt-6 border-t border-white/10 pt-4 text-center text-xs text-purple-200">
               <p>
                 ¿No tienes cuenta?{" "}
-                <Link href="/register" className="text-orange-400 hover:text-orange-300">
+                <Link href={telegramChatId ? `/register?telegram_chat_id=${telegramChatId}` : "/register"} className="text-orange-400 hover:text-orange-300">
                   Regístrate
                 </Link>
               </p>
