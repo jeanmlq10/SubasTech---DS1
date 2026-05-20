@@ -2,7 +2,20 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, LogOut, Plus, RefreshCw, Trash2, Wrench } from "lucide-react";
+import {
+  CalendarClock,
+  ClipboardList,
+  Loader2,
+  LogOut,
+  MapPin,
+  MessageCircle,
+  Phone,
+  Plus,
+  RefreshCw,
+  Trash2,
+  UserRound,
+  Wrench,
+} from "lucide-react";
 
 import { API_URL, Category, OnboardingResponse, TechnicianLead, TechnicianService } from "@/lib/api";
 import { clearStoredAuth, restoreSession } from "@/lib/auth";
@@ -17,6 +30,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea";
 
 type ApiState = "idle" | "loading" | "success" | "error";
+type AppointmentStatus = NonNullable<TechnicianLead["appointment"]>["status"];
 
 type ServiceForm = {
   categoryId: string;
@@ -33,6 +47,41 @@ const emptyServiceForm: ServiceForm = {
   basePrice: "",
   isActive: true,
 };
+
+const surfaceClass = "rounded-2xl border border-white/10 bg-white/5 shadow-2xl backdrop-blur-md";
+const fieldClass = "border-white/20 bg-white/10 text-white placeholder:text-white/50";
+const selectClass = "h-10 w-full rounded-md border border-white/20 bg-white/10 px-3 text-sm text-white";
+
+const leadStatusLabel: Record<TechnicianLead["status"], string> = {
+  new: "Nuevo",
+  contacted: "Contactado",
+  accepted: "Aceptado",
+  closed: "Cerrado",
+};
+
+const appointmentStatusLabel: Record<AppointmentStatus, string> = {
+  pending: "Pendiente",
+  confirmed: "Confirmada",
+  cancelled: "Cancelada",
+  rescheduled: "Reagendada",
+  completed: "Completada",
+  no_show: "No asistio",
+};
+
+function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat("es-CO", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
+function formatTimeRange(start: string, end: string) {
+  const formatter = new Intl.DateTimeFormat("es-CO", {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return `${formatter.format(new Date(start))} - ${formatter.format(new Date(end))}`;
+}
 
 export function TechnicianDashboard() {
   const router = useRouter();
@@ -208,233 +257,390 @@ export function TechnicianDashboard() {
   }
 
   const isLoading = status === "loading";
+  const scheduledLeads = leads.filter((lead) => lead.appointment !== null).length;
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-6 px-4 pb-28 pt-5 sm:px-8 md:pb-8 lg:px-12">
-      <header className="flex flex-col gap-4 rounded-lg border bg-card p-5 shadow-sm md:flex-row md:items-center md:justify-between">
-        <div>
-          <Badge variant="secondary">Technician workspace</Badge>
-          <h1 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">Dashboard tecnico</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-            Administra servicios publicados y solicitudes recibidas desde el flujo conversacional.
-          </p>
-        </div>
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Button onClick={() => void loadWorkspace(token)} disabled={isLoading} className="bg-emerald-600 hover:bg-emerald-700">
-            {isLoading ? <Loader2 className="mr-2 size-4 animate-spin" /> : <RefreshCw className="mr-2 size-4" />}
-            Sincronizar
-          </Button>
-          <Button variant="outline" onClick={logout} disabled={isLoading}>
-            <LogOut className="mr-2 size-4" />
-            Cerrar sesion
-          </Button>
-        </div>
-      </header>
+    <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-950 text-white">
+      <div className="pointer-events-none fixed inset-0 overflow-hidden">
+        <div className="absolute left-1/2 top-10 h-72 w-72 -translate-x-1/2 rounded-full bg-rose-500/20 blur-3xl" />
+        <div className="absolute bottom-20 right-10 h-80 w-80 rounded-full bg-orange-400/10 blur-3xl" />
+      </div>
 
-      <p className={`text-sm ${status === "error" ? "text-destructive" : "text-muted-foreground"}`}>{message}</p>
-
-      <Card className="rounded-lg">
-        <CardHeader>
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-blue-100 p-2 text-blue-700 dark:bg-blue-950 dark:text-blue-200">
-              <Wrench className="size-5" />
-            </div>
+      <main className="relative mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-6 px-4 pb-28 pt-6 sm:px-8 md:pb-10 lg:px-12">
+        <header className={`${surfaceClass} p-6 md:p-8`}>
+          <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
             <div>
-              <CardTitle>Nuevo servicio</CardTitle>
-              <CardDescription>Estos servicios aparecen en las recomendaciones.</CardDescription>
+              <Badge className="border-white/10 bg-white/10 text-purple-100 hover:bg-white/10">Technician workspace</Badge>
+              <h1 className="mt-4 text-3xl font-bold tracking-tight text-white sm:text-4xl">Dashboard tecnico</h1>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-purple-100">
+                Administra tus citas, leads y servicios desde el mismo espacio operativo.
+              </p>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button
+                onClick={() => void loadWorkspace(token)}
+                disabled={isLoading}
+                className="bg-gradient-to-r from-orange-400 to-rose-500 font-semibold text-white hover:from-orange-500 hover:to-rose-600"
+              >
+                {isLoading ? <Loader2 className="mr-2 size-4 animate-spin" /> : <RefreshCw className="mr-2 size-4" />}
+                Sincronizar
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={logout}
+                disabled={isLoading}
+                className="border border-white/10 text-purple-100 hover:bg-white/10 hover:text-white"
+              >
+                <LogOut className="mr-2 size-4" />
+                Cerrar sesion
+              </Button>
             </div>
           </div>
-        </CardHeader>
-        <CardContent>
-          <form className="space-y-4" onSubmit={submitService}>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="category">Categoria</Label>
-                <select
-                  id="category"
-                  value={serviceForm.categoryId}
-                  onChange={(event) => setServiceForm((current) => ({ ...current, categoryId: event.target.value }))}
-                  className="h-10 w-full rounded-md border bg-background px-3 text-sm"
-                  required
-                >
-                  <option value="">Selecciona categoria</option>
-                  {categories.map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {category.name}
+        </header>
+
+        <div className="grid gap-4 md:grid-cols-3">
+          <div className={`${surfaceClass} p-5`}>
+            <p className="text-sm text-purple-200">Citas asignadas</p>
+            <p className="mt-2 text-3xl font-bold">{scheduledLeads}</p>
+          </div>
+          <div className={`${surfaceClass} p-5`}>
+            <p className="text-sm text-purple-200">Leads recibidos</p>
+            <p className="mt-2 text-3xl font-bold">{leads.length}</p>
+          </div>
+          <div className={`${surfaceClass} p-5`}>
+            <p className="text-sm text-purple-200">Servicios activos</p>
+            <p className="mt-2 text-3xl font-bold">{services.filter((service) => service.is_active).length}</p>
+          </div>
+        </div>
+
+        <p className={`text-sm ${status === "error" ? "text-rose-200" : "text-purple-100"}`}>{message}</p>
+
+        <Card className={`${surfaceClass} border-white/10 bg-white/5 text-white`}>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-3 text-white">
+              <span className="rounded-xl bg-gradient-to-br from-orange-400 to-rose-500 p-2 text-white">
+                <ClipboardList className="size-5" />
+              </span>
+              Leads recibidos
+            </CardTitle>
+            <CardDescription className="text-purple-200">
+              Cuando un cliente te escoge en el chatbot y agenda, aqui veras la card de la cita.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Separator className="mb-5 bg-white/10" />
+            <div className="grid gap-4">
+              {leads.length === 0 ? (
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-5 text-center text-sm text-purple-100">
+                  Aun no tienes leads asignados.
+                </div>
+              ) : (
+                leads.map((lead) => {
+                  const appointment = lead.appointment;
+                  return (
+                    <div key={lead.id} className="rounded-2xl border border-white/10 bg-white/[0.07] p-5 shadow-lg">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <p className="text-xs uppercase tracking-[0.24em] text-orange-200">
+                            {appointment ? `Cita #${appointment.id}` : `Lead #${lead.id}`}
+                          </p>
+                          <h3 className="mt-2 text-xl font-semibold text-white">
+                            {appointment?.service_title || lead.service_title || "Servicio tecnico"}
+                          </h3>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Badge className="border-white/10 bg-white/10 text-purple-100 hover:bg-white/10">
+                            {leadStatusLabel[lead.status]}
+                          </Badge>
+                          {appointment ? (
+                            <Badge className="bg-gradient-to-r from-orange-400 to-rose-500 text-white hover:from-orange-400 hover:to-rose-500">
+                              {appointmentStatusLabel[appointment.status]}
+                            </Badge>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      <div className="mt-5 grid gap-3 md:grid-cols-2">
+                        {appointment ? (
+                          <div className="rounded-xl border border-white/10 bg-slate-950/20 p-4">
+                            <div className="flex items-center gap-2 text-sm text-orange-100">
+                              <CalendarClock className="size-4" />
+                              Horario
+                            </div>
+                            <p className="mt-2 font-semibold text-white">{formatDateTime(appointment.scheduled_start)}</p>
+                            <p className="text-sm text-purple-200">
+                              {formatTimeRange(appointment.scheduled_start, appointment.scheduled_end)}
+                            </p>
+                          </div>
+                        ) : null}
+
+                        <div className="rounded-xl border border-white/10 bg-slate-950/20 p-4">
+                          <div className="flex items-center gap-2 text-sm text-orange-100">
+                            <UserRound className="size-4" />
+                            Cliente
+                          </div>
+                          <p className="mt-2 font-semibold text-white">
+                            {lead.client_name || appointment?.client_username || "Cliente sin nombre"}
+                          </p>
+                          <p className="text-sm text-purple-200">{lead.client_phone}</p>
+                        </div>
+
+                        <div className="rounded-xl border border-white/10 bg-slate-950/20 p-4">
+                          <div className="flex items-center gap-2 text-sm text-orange-100">
+                            <MapPin className="size-4" />
+                            Direccion / zona
+                          </div>
+                          <p className="mt-2 text-sm text-purple-100">
+                            {appointment?.client_address || appointment?.location || lead.location || "Sin direccion registrada"}
+                          </p>
+                        </div>
+
+                        <div className="rounded-xl border border-white/10 bg-slate-950/20 p-4">
+                          <div className="flex items-center gap-2 text-sm text-orange-100">
+                            <Phone className="size-4" />
+                            Contacto
+                          </div>
+                          <p className="mt-2 text-sm text-purple-100">{lead.source} | Urgencia: {lead.urgency || "normal"}</p>
+                        </div>
+                      </div>
+
+                      <div className="mt-4 rounded-xl border border-white/10 bg-slate-950/20 p-4">
+                        <div className="flex items-center gap-2 text-sm text-orange-100">
+                          <MessageCircle className="size-4" />
+                          Solicitud del cliente
+                        </div>
+                        <p className="mt-2 text-sm leading-6 text-purple-100">{appointment?.request_text || lead.message}</p>
+                      </div>
+
+                      <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="border border-white/10 text-purple-100 hover:bg-white/10 hover:text-white"
+                          onClick={() => void updateLeadStatus(lead.id, "contacted")}
+                          disabled={isLoading}
+                        >
+                          Contactado
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="border border-white/10 text-purple-100 hover:bg-white/10 hover:text-white"
+                          onClick={() => void updateLeadStatus(lead.id, "accepted")}
+                          disabled={isLoading}
+                        >
+                          Aceptado
+                        </Button>
+                        <Button
+                          size="sm"
+                          className="bg-gradient-to-r from-orange-400 to-rose-500 font-semibold text-white hover:from-orange-500 hover:to-rose-600"
+                          onClick={() => void updateLeadStatus(lead.id, "closed")}
+                          disabled={isLoading}
+                        >
+                          Cerrar lead
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className={`${surfaceClass} border-white/10 bg-white/5 text-white`}>
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <div className="rounded-xl bg-white/10 p-2 text-orange-200">
+                <Wrench className="size-5" />
+              </div>
+              <div>
+                <CardTitle className="text-white">Nuevo servicio</CardTitle>
+                <CardDescription className="text-purple-200">Estos servicios aparecen en las recomendaciones.</CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <form className="space-y-4" onSubmit={submitService}>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="category" className="text-white">
+                    Categoria
+                  </Label>
+                  <select
+                    id="category"
+                    value={serviceForm.categoryId}
+                    onChange={(event) => setServiceForm((current) => ({ ...current, categoryId: event.target.value }))}
+                    className={selectClass}
+                    required
+                  >
+                    <option value="" className="text-slate-900">
+                      Selecciona categoria
                     </option>
-                  ))}
-                </select>
+                    {categories.map((category) => (
+                      <option key={category.id} value={category.id} className="text-slate-900">
+                        {category.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="price" className="text-white">
+                    Precio base
+                  </Label>
+                  <Input
+                    id="price"
+                    min="0"
+                    step="1000"
+                    type="number"
+                    value={serviceForm.basePrice}
+                    onChange={(event) => setServiceForm((current) => ({ ...current, basePrice: event.target.value }))}
+                    placeholder="80000"
+                    className={fieldClass}
+                    required
+                  />
+                </div>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="price">Precio base</Label>
+                <Label htmlFor="title" className="text-white">
+                  Titulo
+                </Label>
                 <Input
-                  id="price"
-                  min="0"
-                  step="1000"
-                  type="number"
-                  value={serviceForm.basePrice}
-                  onChange={(event) => setServiceForm((current) => ({ ...current, basePrice: event.target.value }))}
-                  placeholder="80000"
+                  id="title"
+                  value={serviceForm.title}
+                  onChange={(event) => setServiceForm((current) => ({ ...current, title: event.target.value }))}
+                  placeholder="Instalacion electrica residencial"
+                  className={fieldClass}
                   required
                 />
               </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="title">Titulo</Label>
-              <Input
-                id="title"
-                value={serviceForm.title}
-                onChange={(event) => setServiceForm((current) => ({ ...current, title: event.target.value }))}
-                placeholder="Instalacion electrica residencial"
-                required
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="description">Descripcion</Label>
-              <Textarea
-                id="description"
-                value={serviceForm.description}
-                onChange={(event) => setServiceForm((current) => ({ ...current, description: event.target.value }))}
-                placeholder="Describe alcance, condiciones y tipo de trabajos."
-                required
-              />
-            </div>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                checked={serviceForm.isActive}
-                onChange={(event) => setServiceForm((current) => ({ ...current, isActive: event.target.checked }))}
-                type="checkbox"
-              />
-              Servicio activo
-            </label>
-            <Button type="submit" disabled={isLoading} className="w-full">
-              <Plus className="mr-2 size-4" />
-              Crear servicio
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+              <div className="space-y-2">
+                <Label htmlFor="description" className="text-white">
+                  Descripcion
+                </Label>
+                <Textarea
+                  id="description"
+                  value={serviceForm.description}
+                  onChange={(event) => setServiceForm((current) => ({ ...current, description: event.target.value }))}
+                  placeholder="Describe alcance, condiciones y tipo de trabajos."
+                  className={fieldClass}
+                  required
+                />
+              </div>
+              <label className="flex items-center gap-2 text-sm text-purple-100">
+                <input
+                  checked={serviceForm.isActive}
+                  onChange={(event) => setServiceForm((current) => ({ ...current, isActive: event.target.checked }))}
+                  type="checkbox"
+                  className="accent-rose-500"
+                />
+                Servicio activo
+              </label>
+              <Button
+                type="submit"
+                disabled={isLoading}
+                className="w-full bg-gradient-to-r from-orange-400 to-rose-500 font-semibold text-white hover:from-orange-500 hover:to-rose-600"
+              >
+                <Plus className="mr-2 size-4" />
+                Crear servicio
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
 
-      <Card className="rounded-lg">
-        <CardHeader>
-          <CardTitle>Leads recibidos</CardTitle>
-          <CardDescription>Solicitudes creadas cuando un cliente elige tu servicio por Telegram.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Separator className="mb-4" />
-          <div className="grid gap-3">
-            {leads.length === 0 ? (
-              <div className="rounded-lg border p-4 text-center text-sm text-muted-foreground">Aun no tienes leads asignados.</div>
-            ) : (
-              leads.map((lead) => (
-                <div key={lead.id} className="rounded-lg border p-4 shadow-sm">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <p className="font-medium">{lead.service_title ?? "Servicio tecnico"}</p>
-                      <p className="mt-1 text-sm text-muted-foreground">Cliente: {lead.client_phone}</p>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        Zona: {lead.location || "Sin zona"} - Urgencia: {lead.urgency}
-                      </p>
-                    </div>
-                    <Badge variant={lead.status === "new" ? "default" : "secondary"}>{lead.status}</Badge>
-                  </div>
-                  <p className="mt-3 text-sm leading-6 text-muted-foreground">{lead.message}</p>
-                  <div className="mt-4 grid gap-2 sm:grid-cols-3">
-                    <Button size="sm" variant="outline" onClick={() => void updateLeadStatus(lead.id, "contacted")}>
-                      Contactado
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => void updateLeadStatus(lead.id, "accepted")}>
-                      Aceptado
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => void updateLeadStatus(lead.id, "closed")}>
-                      Cerrado
-                    </Button>
-                  </div>
+        <Card className={`${surfaceClass} border-white/10 bg-white/5 text-white`}>
+          <CardHeader>
+            <CardTitle className="text-white">Servicios publicados</CardTitle>
+            <CardDescription className="text-purple-200">Catalogo del tecnico autenticado.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Separator className="mb-4 bg-white/10" />
+            <div className="grid gap-3 md:hidden">
+              {services.length === 0 ? (
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-center text-sm text-purple-100">
+                  Todavia no hay servicios cargados.
                 </div>
-              ))
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="rounded-lg">
-        <CardHeader>
-          <CardTitle>Servicios publicados</CardTitle>
-          <CardDescription>Catalogo del tecnico autenticado.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Separator className="mb-4" />
-          <div className="grid gap-3 md:hidden">
-            {services.length === 0 ? (
-              <div className="rounded-lg border p-4 text-center text-sm text-muted-foreground">Todavia no hay servicios cargados.</div>
-            ) : (
-              services.map((service) => (
-                <div key={service.id} className="rounded-lg border p-4 shadow-sm">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-medium">{service.title}</p>
-                      <p className="mt-1 text-sm text-muted-foreground">{service.category.name}</p>
+              ) : (
+                services.map((service) => (
+                  <div key={service.id} className="rounded-2xl border border-white/10 bg-white/[0.07] p-4 shadow-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-medium text-white">{service.title}</p>
+                        <p className="mt-1 text-sm text-purple-200">{service.category.name}</p>
+                      </div>
+                      <Badge className="border-white/10 bg-white/10 text-purple-100 hover:bg-white/10">
+                        {service.is_active ? "Activo" : "Inactivo"}
+                      </Badge>
                     </div>
-                    <Badge variant={service.is_active ? "default" : "secondary"}>{service.is_active ? "Activo" : "Inactivo"}</Badge>
+                    <p className="mt-3 line-clamp-2 text-sm text-purple-100">{service.description}</p>
+                    <div className="mt-4 flex items-center justify-between gap-3">
+                      <span className="text-sm font-semibold text-white">${Number(service.base_price).toLocaleString("es-CO")}</span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="border border-white/10 text-purple-100 hover:bg-white/10 hover:text-white"
+                        onClick={() => void deleteService(service.id)}
+                      >
+                        <Trash2 className="mr-2 size-4" />
+                        Eliminar
+                      </Button>
+                    </div>
                   </div>
-                  <p className="mt-3 line-clamp-2 text-sm text-muted-foreground">{service.description}</p>
-                  <div className="mt-4 flex items-center justify-between gap-3">
-                    <span className="text-sm font-semibold">${Number(service.base_price).toLocaleString("es-CO")}</span>
-                    <Button variant="outline" size="sm" onClick={() => void deleteService(service.id)}>
-                      <Trash2 className="mr-2 size-4" />
-                      Eliminar
-                    </Button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-          <div className="hidden overflow-x-auto md:block">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Servicio</TableHead>
-                  <TableHead>Categoria</TableHead>
-                  <TableHead>Precio base</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead className="text-right">Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {services.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={5} className="text-center text-muted-foreground">
-                      Todavia no hay servicios cargados.
-                    </TableCell>
+                ))
+              )}
+            </div>
+            <div className="hidden overflow-x-auto md:block">
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-white/10 hover:bg-white/5">
+                    <TableHead className="text-purple-100">Servicio</TableHead>
+                    <TableHead className="text-purple-100">Categoria</TableHead>
+                    <TableHead className="text-purple-100">Precio base</TableHead>
+                    <TableHead className="text-purple-100">Estado</TableHead>
+                    <TableHead className="text-right text-purple-100">Acciones</TableHead>
                   </TableRow>
-                ) : (
-                  services.map((service) => (
-                    <TableRow key={service.id}>
-                      <TableCell>
-                        <p className="font-medium">{service.title}</p>
-                        <p className="line-clamp-1 text-sm text-muted-foreground">{service.description}</p>
-                      </TableCell>
-                      <TableCell>{service.category.name}</TableCell>
-                      <TableCell>${Number(service.base_price).toLocaleString("es-CO")}</TableCell>
-                      <TableCell>
-                        <Badge variant={service.is_active ? "default" : "secondary"}>
-                          {service.is_active ? "Activo" : "Inactivo"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" onClick={() => void deleteService(service.id)}>
-                          <Trash2 className="size-4" />
-                          <span className="sr-only">Eliminar</span>
-                        </Button>
+                </TableHeader>
+                <TableBody>
+                  {services.length === 0 ? (
+                    <TableRow className="border-white/10 hover:bg-white/5">
+                      <TableCell colSpan={5} className="text-center text-purple-100">
+                        Todavia no hay servicios cargados.
                       </TableCell>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
+                  ) : (
+                    services.map((service) => (
+                      <TableRow key={service.id} className="border-white/10 hover:bg-white/5">
+                        <TableCell>
+                          <p className="font-medium text-white">{service.title}</p>
+                          <p className="line-clamp-1 text-sm text-purple-200">{service.description}</p>
+                        </TableCell>
+                        <TableCell className="text-purple-100">{service.category.name}</TableCell>
+                        <TableCell className="text-purple-100">${Number(service.base_price).toLocaleString("es-CO")}</TableCell>
+                        <TableCell>
+                          <Badge className="border-white/10 bg-white/10 text-purple-100 hover:bg-white/10">
+                            {service.is_active ? "Activo" : "Inactivo"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-purple-100 hover:bg-white/10 hover:text-white"
+                            onClick={() => void deleteService(service.id)}
+                          >
+                            <Trash2 className="size-4" />
+                            <span className="sr-only">Eliminar</span>
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      </main>
       <MobileRoleNav />
     </div>
   );

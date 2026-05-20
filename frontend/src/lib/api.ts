@@ -199,6 +199,19 @@ export type TechnicianLead = {
   urgency: string;
   source: string;
   status: "new" | "contacted" | "accepted" | "closed";
+  appointment: {
+    id: number;
+    scheduled_start: string;
+    scheduled_end: string;
+    status: "pending" | "confirmed" | "cancelled" | "rescheduled" | "completed" | "no_show";
+    service_title: string;
+    client_username: string;
+    client_address: string;
+    request_text: string;
+    location: string;
+    created_at: string;
+    updated_at: string;
+  } | null;
   created_at: string;
   updated_at: string;
 };
