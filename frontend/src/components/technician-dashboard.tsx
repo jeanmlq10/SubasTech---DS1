@@ -17,7 +17,7 @@ import {
   Wrench,
 } from "lucide-react";
 
-import { API_URL, Auction, Category, OnboardingResponse, TechnicianLead, TechnicianService } from "@/lib/api";
+import { API_URL, Auction, Category, OnboardingResponse, Rating, TechnicianLead, TechnicianService } from "@/lib/api";
 import { clearStoredAuth, restoreSession } from "@/lib/auth";
 import { MobileRoleNav } from "@/components/mobile-role-nav";
 import { Badge } from "@/components/ui/badge";
@@ -98,6 +98,7 @@ export function TechnicianDashboard() {
   const [services, setServices] = useState<TechnicianService[]>([]);
   const [leads, setLeads] = useState<TechnicianLead[]>([]);
   const [auctions, setAuctions] = useState<Auction[]>([]);
+  const [ratings, setRatings] = useState<Rating[]>([]);
   const [bidDrafts, setBidDrafts] = useState<Record<number, BidDraft>>({});
   const [serviceForm, setServiceForm] = useState<ServiceForm>(emptyServiceForm);
   const [status, setStatus] = useState<ApiState>("loading");
@@ -129,15 +130,16 @@ export function TechnicianDashboard() {
           Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
         };
-        const [onboardingResponse, categoryResponse, servicesResponse, leadsResponse, auctionsResponse] = await Promise.all([
+        const [onboardingResponse, categoryResponse, servicesResponse, leadsResponse, auctionsResponse, ratingsResponse] = await Promise.all([
           fetch(`${API_URL}/technician/onboarding/`, { headers: requestHeaders }),
           fetch(`${API_URL}/categories/`),
           fetch(`${API_URL}/technician/services/`, { headers: requestHeaders }),
           fetch(`${API_URL}/technician/leads/`, { headers: requestHeaders }),
           fetch(`${API_URL}/auctions/`, { headers: requestHeaders }),
+          fetch(`${API_URL}/ratings/`, { headers: requestHeaders }),
         ]);
 
-        if (!onboardingResponse.ok || !categoryResponse.ok || !servicesResponse.ok || !leadsResponse.ok || !auctionsResponse.ok) {
+        if (!onboardingResponse.ok || !categoryResponse.ok || !servicesResponse.ok || !leadsResponse.ok || !auctionsResponse.ok || !ratingsResponse.ok) {
           throw new Error("Workspace request failed");
         }
 
@@ -151,6 +153,7 @@ export function TechnicianDashboard() {
         setServices((await servicesResponse.json()) as TechnicianService[]);
         setLeads((await leadsResponse.json()) as TechnicianLead[]);
         setAuctions((await auctionsResponse.json()) as Auction[]);
+        setRatings((await ratingsResponse.json()) as Rating[]);
         setStatus("success");
         setMessage("Workspace sincronizado.");
       } catch {
@@ -334,6 +337,10 @@ export function TechnicianDashboard() {
   const isLoading = status === "loading";
   const scheduledLeads = leads.filter((lead) => lead.appointment !== null).length;
   const openAuctions = auctions.filter((auction) => auction.status === "open");
+  const receivedRatings = ratings.filter((rating) => rating.target_role === "technician");
+  const averageRating = receivedRatings.length
+    ? (receivedRatings.reduce((total, rating) => total + rating.score, 0) / receivedRatings.length).toFixed(1)
+    : "0.0";
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-950 text-white">
@@ -384,8 +391,9 @@ export function TechnicianDashboard() {
             <p className="mt-2 text-3xl font-bold">{leads.length}</p>
           </div>
           <div className={`${surfaceClass} p-5`}>
-            <p className="text-sm text-purple-200">Servicios activos</p>
-            <p className="mt-2 text-3xl font-bold">{services.filter((service) => service.is_active).length}</p>
+            <p className="text-sm text-purple-200">Rating promedio</p>
+            <p className="mt-2 text-3xl font-bold">{averageRating}</p>
+            <p className="text-xs text-purple-200">{receivedRatings.length} reseñas</p>
           </div>
         </div>
 

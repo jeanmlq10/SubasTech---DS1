@@ -319,3 +319,20 @@ export type Dispute = {
   updated_at: string;
   resolved_at: string | null;
 };
+
+export type Rating = {
+  id: number;
+  author: number;
+  author_username: string;
+  target_role: "technician" | "client";
+  technician: number | null;
+  technician_name: string;
+  client: number | null;
+  client_username: string;
+  lead: number | null;
+  service: number | null;
+  score: number;
+  comment: string;
+  created_at: string;
+  updated_at: string;
+};

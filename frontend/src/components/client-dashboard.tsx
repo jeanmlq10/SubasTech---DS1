@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { Calendar, ClipboardList, LayoutDashboard, LogOut, MessageCircle, Settings, User } from "lucide-react";
 
-import { API_URL, Appointment, Auction, Category, Dispute, Zone } from "@/lib/api";
+import { API_URL, Appointment, Auction, Category, Dispute, Rating, Zone } from "@/lib/api";
 import { clearStoredAuth, restoreSession, roleHome } from "@/lib/auth";
 import { MobileRoleNav } from "@/components/mobile-role-nav";
 import { Badge } from "@/components/ui/badge";
@@ -35,6 +35,7 @@ export function ClientDashboard() {
   const [auctions, setAuctions] = useState<Auction[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [disputes, setDisputes] = useState<Dispute[]>([]);
+  const [ratings, setRatings] = useState<Rating[]>([]);
   const [message, setMessage] = useState("Cargando dashboard...");
   const [isBooting, setIsBooting] = useState(true);
   const [auctionForm, setAuctionForm] = useState({
@@ -75,14 +76,15 @@ export function ClientDashboard() {
 
   async function loadClientData(accessToken: string) {
     try {
-      const [categoryResponse, zoneResponse, auctionResponse, appointmentResponse, disputeResponse] = await Promise.all([
+      const [categoryResponse, zoneResponse, auctionResponse, appointmentResponse, disputeResponse, ratingResponse] = await Promise.all([
         fetch(`${API_URL}/categories/`),
         fetch(`${API_URL}/zones/`),
         fetch(`${API_URL}/auctions/`, { headers: { Authorization: `Bearer ${accessToken}` } }),
         fetch(`${API_URL}/appointments/`, { headers: { Authorization: `Bearer ${accessToken}` } }),
         fetch(`${API_URL}/disputes/`, { headers: { Authorization: `Bearer ${accessToken}` } }),
+        fetch(`${API_URL}/ratings/`, { headers: { Authorization: `Bearer ${accessToken}` } }),
       ]);
-      if (!categoryResponse.ok || !zoneResponse.ok || !auctionResponse.ok || !appointmentResponse.ok || !disputeResponse.ok) {
+      if (!categoryResponse.ok || !zoneResponse.ok || !auctionResponse.ok || !appointmentResponse.ok || !disputeResponse.ok || !ratingResponse.ok) {
         throw new Error("Client data request failed");
       }
       setCategories((await categoryResponse.json()) as Category[]);
@@ -90,6 +92,7 @@ export function ClientDashboard() {
       setAuctions((await auctionResponse.json()) as Auction[]);
       setAppointments((await appointmentResponse.json()) as Appointment[]);
       setDisputes((await disputeResponse.json()) as Dispute[]);
+      setRatings((await ratingResponse.json()) as Rating[]);
       setMessage("Dashboard actualizado.");
     } catch {
       setMessage("No se pudo cargar la informacion de subastas.");
@@ -205,6 +208,43 @@ export function ClientDashboard() {
     }
   }
 
+  async function rateAppointment(appointment: Appointment) {
+    if (!token) {
+      setMessage("Inicia sesion antes de calificar.");
+      return;
+    }
+
+    const scoreValue = window.prompt("Califica el servicio de 1 a 5.", "5");
+    const score = Number(scoreValue);
+    if (!Number.isInteger(score) || score < 1 || score > 5) {
+      setMessage("La calificacion debe ser un numero entre 1 y 5.");
+      return;
+    }
+    const comment = window.prompt("Comentario opcional para el tecnico.", "") ?? "";
+
+    try {
+      const response = await fetch(`${API_URL}/ratings/`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          target_role: "technician",
+          technician: appointment.technician,
+          service: appointment.service,
+          lead: appointment.lead,
+          score,
+          comment,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error("No se pudo guardar la calificacion.");
+      }
+      await loadClientData(token);
+      setMessage("Calificacion registrada.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo guardar la calificacion.");
+    }
+  }
+
   function logout() {
     clearStoredAuth();
     router.replace("/login");
@@ -216,6 +256,8 @@ export function ClientDashboard() {
   const closedAuctions = auctions.filter((auction) => ["cancelled", "expired"].includes(auction.status)).length;
   const activeAppointments = appointments.filter((appointment) => ["pending", "confirmed", "rescheduled"].includes(appointment.status));
   const completedAppointments = appointments.filter((appointment) => appointment.status === "completed");
+  const ratedLeadIds = new Set(ratings.filter((rating) => rating.target_role === "technician" && rating.lead).map((rating) => rating.lead));
+  const ratedServiceIds = new Set(ratings.filter((rating) => rating.target_role === "technician" && !rating.lead && rating.service).map((rating) => rating.service));
   const statCards = [
     { title: "Solicitudes activas", value: String(openAuctions.length), detail: `${auctions.length} solicitudes totales` },
     { title: "Citas activas", value: String(activeAppointments.length), detail: `${completedAppointments.length} completadas` },
@@ -431,6 +473,14 @@ export function ClientDashboard() {
                 ) : (
                   appointments.map((appointment) => (
                     <div key={appointment.id} className="rounded-2xl border border-white/10 bg-white/[0.07] p-4">
+                      {(() => {
+                        const alreadyRated = appointment.lead
+                          ? ratedLeadIds.has(appointment.lead)
+                          : appointment.service
+                            ? ratedServiceIds.has(appointment.service)
+                            : false;
+                        return (
+                          <>
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div>
                           <p className="text-xs uppercase tracking-[0.24em] text-orange-200">Cita #{appointment.id}</p>
@@ -460,7 +510,19 @@ export function ClientDashboard() {
                         >
                           Abrir disputa
                         </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="border border-white/10 text-purple-100 hover:bg-white/10 hover:text-white"
+                          disabled={appointment.status !== "completed" || alreadyRated}
+                          onClick={() => void rateAppointment(appointment)}
+                        >
+                          {alreadyRated ? "Calificado" : "Calificar"}
+                        </Button>
                       </div>
+                          </>
+                        );
+                      })()}
                     </div>
                   ))
                 )}
