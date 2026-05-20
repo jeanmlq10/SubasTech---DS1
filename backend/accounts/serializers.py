@@ -7,7 +7,19 @@ User = get_user_model()
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ["id", "username", "first_name", "last_name", "email", "role", "phone_number", "address", "telegram_chat_id", "whatsapp_id"]
+        fields = [
+            "id",
+            "username",
+            "first_name",
+            "last_name",
+            "email",
+            "role",
+            "technician_trade",
+            "phone_number",
+            "address",
+            "telegram_chat_id",
+            "whatsapp_id",
+        ]
         read_only_fields = ["id"]
 
 
@@ -17,7 +29,7 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ["id", "username", "email", "password", "role", "phone_number", "address"]
+        fields = ["id", "username", "email", "password", "role", "technician_trade", "phone_number", "address"]
         read_only_fields = ["id"]
 
     def validate_role(self, value):
@@ -27,6 +39,19 @@ class RegisterSerializer(serializers.ModelSerializer):
                 f"Public registration is only allowed for these roles: {allowed}."
             )
         return value
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        role = attrs.get("role")
+        trade = attrs.get("technician_trade", "")
+
+        if role == User.Role.TECHNICIAN and not trade:
+            raise serializers.ValidationError({"technician_trade": "Technician profession is required."})
+
+        if role != User.Role.TECHNICIAN:
+            attrs["technician_trade"] = ""
+
+        return attrs
 
     def create(self, validated_data):
         password = validated_data.pop("password")

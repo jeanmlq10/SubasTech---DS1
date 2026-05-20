@@ -1,4 +1,9 @@
-export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
+function normalizeApiUrl(value: string | undefined): string {
+  const raw = (value ?? "http://localhost:8000/api").trim().replace(/\/+$/, "");
+  return raw.endsWith("/api") ? raw : `${raw}/api`;
+}
+
+export const API_URL = normalizeApiUrl(process.env.NEXT_PUBLIC_API_URL);
 
 export type User = {
   id: number;
@@ -7,7 +12,10 @@ export type User = {
   last_name: string;
   email: string;
   role: "client" | "technician" | "admin" | "arbiter";
+  technician_trade: "electrician" | "plumber" | "locksmith" | "general-handyman" | "";
   phone_number: string;
+  address: string;
+  telegram_chat_id: string | null;
   whatsapp_id: string | null;
 };
 

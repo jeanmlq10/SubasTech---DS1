@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, ShieldCheck, Star, Users, Wrench } from "lucide-react";
 
-import { clearStoredAuth, getStoredAuth } from "@/lib/auth";
+import { clearStoredAuth, restoreSession } from "@/lib/auth";
 import { AdminSummary, API_URL, Category, Zone } from "@/lib/api";
 import { MobileRoleNav } from "@/components/mobile-role-nav";
 import { Badge } from "@/components/ui/badge";
@@ -59,12 +59,20 @@ export function AdminDashboard() {
   const [message, setMessage] = useState("Login in /login or use an administrator JWT token to load platform metrics.");
 
   useEffect(() => {
-    const session = getStoredAuth();
-    if (session) {
-      setToken(session.accessToken);
-      setMessage(`Sesion activa como ${session.user.username} (${session.user.role}). Puedes sincronizar el panel.`);
-    }
+    let mounted = true;
+
+    void (async () => {
+      const session = await restoreSession();
+      if (mounted && session) {
+        setToken(session.accessToken);
+        setMessage(`Sesion activa como ${session.user.username} (${session.user.role}). Puedes sincronizar el panel.`);
+      }
+    })();
     void loadCatalog();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   function logout() {

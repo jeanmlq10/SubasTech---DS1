@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { Loader2, LogIn, MessageCircle, Gauge, Calendar, ClipboardList } from "lucide-react";
 
-import { getStoredAuth, loginWithPassword, roleHome } from "@/lib/auth";
+import { loginWithPassword, restoreSession, roleHome } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -41,10 +41,18 @@ export function LoginForm() {
   const [message, setMessage] = useState("Ingresa con tu usuario para abrir el panel correspondiente a tu rol.");
 
   useEffect(() => {
-    const session = getStoredAuth();
-    if (session) {
-      setMessage(`Sesion activa como ${session.user.username}. Puedes continuar a tu dashboard.`);
-    }
+    let mounted = true;
+
+    void (async () => {
+      const session = await restoreSession();
+      if (mounted && session) {
+        setMessage(`Sesion activa como ${session.user.username}. Puedes continuar a tu dashboard.`);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   async function submitLogin(event: FormEvent<HTMLFormElement>) {

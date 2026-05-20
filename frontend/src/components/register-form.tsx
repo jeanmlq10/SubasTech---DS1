@@ -17,8 +17,6 @@ const TECHNICIAN_PROFESSIONS = [
   { value: "general-handyman", label: "Mantenimiento general" },
 ];
 
-const TECHNICIAN_ROLE_STORAGE_KEY = "subastech.technicianProfession";
-
 export function RegisterForm() {
   const router = useRouter();
   const [username, setUsername] = useState("");
@@ -48,15 +46,9 @@ export function RegisterForm() {
         email: isTechnician ? undefined : email,
         password,
         role,
+        technician_trade: isTechnician ? (technicianProfession as "electrician" | "plumber" | "locksmith" | "general-handyman") : undefined,
       });
       const session = await loginWithPassword(username, password);
-      if (typeof window !== "undefined") {
-        if (isTechnician && technicianProfession) {
-          window.localStorage.setItem(TECHNICIAN_ROLE_STORAGE_KEY, technicianProfession);
-        } else {
-          window.localStorage.removeItem(TECHNICIAN_ROLE_STORAGE_KEY);
-        }
-      }
       router.push(roleHome(session.user.role));
     } catch (error) {
       const detail = error instanceof Error ? error.message : "No se pudo completar el registro.";

@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Loader2, Plus, RefreshCw, Trash2, UserCheck, Wrench } from "lucide-react";
 
-import { clearStoredAuth, getStoredAuth } from "@/lib/auth";
+import { clearStoredAuth, restoreSession } from "@/lib/auth";
 import { API_URL, Category, OnboardingResponse, TechnicianLead, TechnicianService, Zone } from "@/lib/api";
 import { MobileRoleNav } from "@/components/mobile-role-nav";
 import { Badge } from "@/components/ui/badge";
@@ -48,11 +48,19 @@ export function TechnicianDashboard() {
   const [message, setMessage] = useState("Login in /login or use a JWT token to sync your technician workspace.");
 
   useEffect(() => {
-    const session = getStoredAuth();
-    if (session) {
-      setToken(session.accessToken);
-      setMessage(`Sesion activa como ${session.user.username} (${session.user.role}). Puedes sincronizar el panel.`);
-    }
+    let mounted = true;
+
+    void (async () => {
+      const session = await restoreSession();
+      if (mounted && session) {
+        setToken(session.accessToken);
+        setMessage(`Sesion activa como ${session.user.username} (${session.user.role}). Puedes sincronizar el panel.`);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   function logout() {
