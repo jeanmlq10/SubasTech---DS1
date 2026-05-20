@@ -77,6 +77,8 @@ ZONE_KEYWORDS = {
 }
 YES_CHOICES = {"si", "s", "confirmo", "yes"}
 NO_CHOICES = {"no", "n"}
+RESET_CHOICES = {"inicio", "menu", "menú", "volver", "reiniciar", "empezar", "cancelar flujo"}
+RESET_HINT = "Escribe INICIO para volver al principio."
 CONTACT_PROMPTS = {
     "full_name": "Antes de agendar, necesito tus datos. Escribeme tu nombre completo.",
     "phone_number": "Ahora comparte tu numero de celular en formato nacional o internacional.",
@@ -129,6 +131,22 @@ def _reset_session(session: ChatSession) -> None:
     _update_session(session, step="initial", state_data={})
 
 
+def _build_welcome_message() -> str:
+    return (
+        "Hola, soy el asistente de SubasTech.\n\n"
+        "Puedo ayudarte a encontrar tecnicos del hogar y agendar una cita.\n\n"
+        "Que servicio necesitas?\n"
+        "1. Electricista\n2. Plomero\n3. Cerrajero\n4. Mantenimiento general\n\n"
+        "Tambien puedes describirme tu problema."
+    )
+
+
+def _with_navigation_hint(message: str) -> str:
+    if RESET_HINT in message:
+        return message
+    return f"{message}\n\n{RESET_HINT}"
+
+
 def _process_chat_message(
     chat_id: int,
     text: str,
@@ -149,7 +167,7 @@ def _process_chat_message(
 
         intent = extract_intent(text)
         _save_inbound(session, text, intent)
-        reply = handle_conversation(session, text, intent)
+        reply = _with_navigation_hint(handle_conversation(session, text, intent))
         _save_outbound(session, reply)
         if telegram_message_id is not None:
             session.last_telegram_message_id = telegram_message_id
@@ -301,15 +319,13 @@ def handle_conversation(session: ChatSession, text: str, intent: dict) -> str:
         intent = {"accion": "agendar", "categoria": CATEGORY_CHOICES[cleaned_text], "zona": None}
         accion = "agendar"
 
+    if lowered in RESET_CHOICES:
+        _reset_session(session)
+        return _build_welcome_message()
+
     if accion == "saludo" or lowered in {"/start", "hola", "buenas", "buenos dias"}:
         _reset_session(session)
-        return (
-            "Hola, soy el asistente de SubasTech.\n\n"
-            "Puedo ayudarte a encontrar tecnicos del hogar y agendar una cita.\n\n"
-            "Que servicio necesitas?\n"
-            "1. Electricista\n2. Plomero\n3. Cerrajero\n4. Mantenimiento general\n\n"
-            "Tambien puedes describirme tu problema."
-        )
+        return _build_welcome_message()
 
     if step == "waiting_zone":
         return _handle_zone_selection(session, cleaned_text, state)

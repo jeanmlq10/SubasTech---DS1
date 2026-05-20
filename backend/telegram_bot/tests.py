@@ -83,6 +83,7 @@ class TelegramBotTests(TestCase):
         self.assertEqual(body["step"], "waiting_technician_selection")
         self.assertIn("Tecnicos disponibles", body["reply"])
         self.assertIn("Carlos Mendoza", body["reply"])
+        self.assertIn("Escribe INICIO para volver al principio.", body["reply"])
 
     def test_missing_zone_asks_for_free_text_neighborhood(self):
         response = self._send_message("Necesito un electricista")
@@ -113,6 +114,17 @@ class TelegramBotTests(TestCase):
         self.assertEqual(zone_response.json()["step"], "waiting_zone")
         self.assertIn("No encontre ese barrio", zone_response.json()["reply"])
         self.assertNotIn("Alto Prado", zone_response.json()["reply"])
+
+    def test_reset_command_returns_to_start_from_any_step(self):
+        first_response = self._send_message("Necesito un electricista")
+        self.assertEqual(first_response.json()["step"], "waiting_zone")
+
+        reset_response = self._send_message("inicio")
+
+        self.assertEqual(reset_response.status_code, 200)
+        self.assertEqual(reset_response.json()["step"], "initial")
+        self.assertIn("Hola, soy el asistente de SubasTech.", reset_response.json()["reply"])
+        self.assertIn("Escribe INICIO para volver al principio.", reset_response.json()["reply"])
 
     def test_history_persists_full_conversation(self):
         self._send_message("hola")
