@@ -553,6 +553,7 @@ def _start_auction_flow(session: ChatSession, state: dict) -> str:
     user_phone = (getattr(user, "phone_number", "") or "").strip() if user else ""
     if not user_phone:
         _update_session(session, step="waiting_auction_phone", state_data=state)
+        return "Cual es tu numero de celular?"
     user_address = (getattr(user, "address", "") or "").strip() if user else ""
     if not user_address:
         _update_session(session, step="waiting_auction_address", state_data=state)
