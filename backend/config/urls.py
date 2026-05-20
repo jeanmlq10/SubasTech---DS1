@@ -3,10 +3,10 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from rest_framework_simplejwt.views import TokenRefreshView
 
 from audit.views import AuditEventViewSet
-from accounts.views import MeAPIView, RegisterAPIView
+from accounts.views import EmailOrUsernameTokenObtainPairView, MeAPIView, RegisterAPIView
 from adminpanel.views import AdminSummaryAPIView, AdminTechnicianActionAPIView
 from appointments.views import AppointmentViewSet, TechnicianAvailableSlotsAPIView
 from catalog.views import (
@@ -45,7 +45,7 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/auth/register/", RegisterAPIView.as_view(), name="register"),
     path("api/auth/me/", MeAPIView.as_view(), name="me"),
-    path("api/auth/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
+    path("api/auth/token/", EmailOrUsernameTokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("api/auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("api/health/", HealthAPIView.as_view(), name="health"),
     path("api/admin/summary/", AdminSummaryAPIView.as_view(), name="admin_summary"),

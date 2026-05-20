@@ -4,7 +4,7 @@ const password = "Subastech123!";
 
 async function loginAs(page: Page, username: string) {
   await page.goto("/login");
-  await page.getByLabel("Usuario").fill(username);
+  await page.getByLabel("Correo o usuario").fill(username);
   await page.getByLabel("Contrasena").fill(password);
   await page.getByRole("button", { name: /entrar/i }).click();
 }
@@ -31,7 +31,7 @@ test.describe("role login redirects", () => {
 
 test("invalid credentials show an error", async ({ page }) => {
   await page.goto("/login");
-  await page.getByLabel("Usuario").fill("demo_admin");
+  await page.getByLabel("Correo o usuario").fill("demo_admin");
   await page.getByLabel("Contrasena").fill("wrong-password");
   await page.getByRole("button", { name: /entrar/i }).click();
 

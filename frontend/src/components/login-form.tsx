@@ -35,10 +35,10 @@ const features = [
 
 export function LoginForm() {
   const router = useRouter();
-  const [username, setUsername] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState("Ingresa con tu usuario para abrir el panel correspondiente a tu rol.");
+  const [message, setMessage] = useState("Ingresa con tu correo o usuario para abrir el panel correspondiente a tu rol.");
 
   useEffect(() => {
     let mounted = true;
@@ -59,10 +59,10 @@ export function LoginForm() {
     event.preventDefault();
     setLoading(true);
     try {
-      const session = await loginWithPassword(username, password);
+      const session = await loginWithPassword(identifier, password);
       router.push(roleHome(session.user.role));
     } catch {
-      setMessage("No se pudo iniciar sesion. Revisa usuario, clave y backend.");
+      setMessage("No se pudo iniciar sesion. Revisa correo/usuario, clave y backend.");
     } finally {
       setLoading(false);
     }
@@ -102,20 +102,20 @@ export function LoginForm() {
                 </div>
               </div>
               <h1 className="text-3xl font-bold text-white">Login</h1>
-              <p className="text-sm text-purple-200">Accede a tu dashboard con tu usuario</p>
+              <p className="text-sm text-purple-200">Accede a tu dashboard con tu correo o usuario</p>
             </div>
 
             <form className="space-y-4" onSubmit={submitLogin}>
               <div className="space-y-2">
-                <Label htmlFor="username" className="text-white">
-                  Usuario
+                <Label htmlFor="identifier" className="text-white">
+                  Correo o usuario
                 </Label>
                 <Input
-                  id="username"
-                  value={username}
-                  onChange={(event) => setUsername(event.target.value)}
+                  id="identifier"
+                  value={identifier}
+                  onChange={(event) => setIdentifier(event.target.value)}
                   className="border-white/20 bg-white/10 text-white placeholder:text-white/50"
-                  placeholder="tu_usuario"
+                  placeholder="tu@correo.com o tu_usuario"
                   required
                 />
               </div>

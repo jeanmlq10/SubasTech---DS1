@@ -1,5 +1,7 @@
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from django.db.models import Q
+from django.db.models.functions import Lower
 
 
 class User(AbstractUser):
@@ -25,3 +27,12 @@ class User(AbstractUser):
     @property
     def is_technician(self) -> bool:
         return self.role == self.Role.TECHNICIAN
+
+    class Meta(AbstractUser.Meta):
+        constraints = [
+            models.UniqueConstraint(
+                Lower("email"),
+                condition=~Q(email=""),
+                name="unique_non_blank_user_email_ci",
+            )
+        ]

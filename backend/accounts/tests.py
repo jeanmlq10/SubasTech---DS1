@@ -22,6 +22,43 @@ class RegisterAPITests(TestCase):
 
         self.assertEqual(response.status_code, 201)
         self.assertTrue(self.user_model.objects.filter(username="public-client", role="client").exists())
+        self.assertEqual(self.user_model.objects.get(username="public-client").email, "client@example.com")
+
+    def test_public_registration_rejects_client_without_email(self):
+        response = self.client.post(
+            "/api/auth/register/",
+            {
+                "username": "client-no-email",
+                "password": "Password123",
+                "role": "client",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("email", response.json())
+
+    def test_public_registration_rejects_duplicate_email_case_insensitive(self):
+        self.user_model.objects.create_user(
+            username="existing-client",
+            email="client@example.com",
+            password="Password123",
+            role="client",
+        )
+
+        response = self.client.post(
+            "/api/auth/register/",
+            {
+                "username": "duplicate-client",
+                "email": "CLIENT@example.com",
+                "password": "Password123",
+                "role": "client",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("email", response.json())
 
     def test_public_registration_rejects_admin_role(self):
         response = self.client.post(
@@ -94,6 +131,32 @@ class AuthSessionTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("access", response.json())
         self.assertIn("refresh", response.json())
+
+    def test_token_obtain_pair_accepts_email_credentials(self):
+        response = self.client.post(
+            "/api/auth/token/",
+            {
+                "email": "SESSION@example.com",
+                "password": "Password123",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("access", response.json())
+        self.assertIn("refresh", response.json())
+
+    def test_token_obtain_pair_rejects_invalid_email_credentials(self):
+        response = self.client.post(
+            "/api/auth/token/",
+            {
+                "email": "session@example.com",
+                "password": "WrongPassword123",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 401)
 
     def test_me_returns_authenticated_user_with_jwt(self):
         token_response = self.client.post(

@@ -121,11 +121,13 @@ export async function registerUser(payload: RegisterPayload): Promise<void> {
   }
 }
 
-export async function loginWithPassword(username: string, password: string): Promise<AuthSession> {
+export async function loginWithPassword(identifier: string, password: string): Promise<AuthSession> {
+  const login = identifier.trim();
+  const credentialPayload = login.includes("@") ? { email: login, password } : { username: login, password };
   const tokenResponse = await fetch(`${API_URL}/auth/token/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify(credentialPayload),
   });
 
   if (!tokenResponse.ok) {
