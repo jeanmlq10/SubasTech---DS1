@@ -33,6 +33,37 @@ frontend/   Next.js 15, TypeScript, Tailwind CSS, shadcn/ui
 backend/    Django, Django REST Framework, JWT auth, recommendation modules
 ```
 
+## Technology Stack
+
+| Category | Technologies |
+| --- | --- |
+| **Frontend** | Next.js 15 (App Router), React 19, TypeScript, Tailwind CSS 4, shadcn/ui (`@base-ui/react`), Lucide icons |
+| **Backend framework** | Django |
+| **API layer** | Django REST Framework (ViewSets, routers, serializers) |
+| **Authentication** | `djangorestframework-simplejwt` (JWT access/refresh), custom `accounts.User` with role-based access |
+| **Database** | SQLite (default local), PostgreSQL via `psycopg2-binary` (optional `POSTGRES_*` env or Docker Compose) |
+| **ORM** | Django ORM |
+| **Testing** | Django `manage.py test` (backend), Playwright (frontend E2E), ESLint (`next lint`) |
+| **Architecture style** | Monorepo with modular Django apps, service-layer business logic, REST API + responsive Next.js dashboards |
+| **Conversational channel** | Telegram (`python-telegram-bot` webhook and chatbot flow) |
+| **LLM integration** | Google Gemini (`google-genai`) with deterministic rule-based fallback in `llm` |
+| **Notifications** | `notifications` app (in-app records; channels include dashboard, Telegram, email, WhatsApp enum) |
+| **WhatsApp integration** | Legacy identifiers and channel enums (`whatsapp_id`, lead `source=whatsapp`); no WhatsApp Business API client in the MVP—client intake is Telegram-first |
+| **Media** | Pillow (service photos and uploads) |
+| **Containerization** | Docker Compose (`postgres`, `backend`, `frontend`), per-service Dockerfiles |
+| **Deployment / infrastructure** | GitHub Actions workflow on `staging` (backend tests, frontend lint/build, Playwright E2E); `gunicorn` listed for production-style serving |
+| **Development tools** | `python-dotenv`, `python-decouple`, `django-cors-headers`, `requests`, project scripts under `scripts/` |
+
+### Backend Architecture Highlights
+
+- **Service-layer architecture** — domain rules live in `*/services.py` modules (appointments, reputation, disputes, audit, recommendations, LLM, notifications, auctions); views stay thin.
+- **DRF ViewSets** — catalog, appointments, leads, disputes, reputation, notifications, and audit exposed through registered routers in `config/urls.py`.
+- **JWT authentication** — global `JWTAuthentication` with token and refresh endpoints; role-aware permission classes in `accounts.permissions`.
+- **Audit logging** — `audit` app records operational events via `audit.services.log_audit_event`.
+- **Role-based permissions** — clients, technicians, administrators, and arbiters enforced in view/queryset layers and custom DRF permissions.
+- **Transactional business logic** — appointment and conversational flows use `transaction.atomic()` and `select_for_update` where scheduling conflicts matter.
+- **Appointment scheduling** — dedicated `appointments` models and services for slot calculation, booking, cancellation, rescheduling, and completion with lead and notification side effects.
+
 ## Backend modules
 
 - `accounts`: users, roles and JWT-ready auth endpoints.
