@@ -13,6 +13,6 @@ test("public pages and API health are available", async ({ page, request }) => {
   await page.goto("/login");
   await expect(page.getByText("Iniciar sesion")).toBeVisible();
 
-  await page.goto("/demo");
-  await expect(page.getByText(/subastech/i).first()).toBeVisible();
+  await page.goto("/register");
+  await expect(page.getByRole("heading", { name: /regístrate/i })).toBeVisible();
 });

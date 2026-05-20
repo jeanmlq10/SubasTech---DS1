@@ -3,20 +3,12 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
-import { Loader2, LogIn, MessageCircle, Gauge, Wrench, ShieldCheck, Calendar, ClipboardList } from "lucide-react";
+import { Loader2, LogIn, MessageCircle, Gauge, Calendar, ClipboardList } from "lucide-react";
 
 import { getStoredAuth, loginWithPassword, roleHome } from "@/lib/auth";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent } from "@/components/ui/card";
-
-const demoUsers = [
-  { username: "demo_admin", role: "Admin", target: "/admin" },
-  { username: "tech_carlos", role: "Tecnico", target: "/technician" },
-  { username: "demo_arbiter", role: "Arbitro", target: "/arbiter" },
-];
 
 const features = [
   {
@@ -70,7 +62,6 @@ export function LoginForm() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-slate-900 via-purple-900 to-slate-950">
-      {/* Gradient overlay con luna estilizada */}
       <div className="pointer-events-none fixed inset-0">
         <svg className="absolute inset-0 h-full w-full" viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid slice">
           <defs>
@@ -79,9 +70,7 @@ export function LoginForm() {
               <stop offset="100%" stopColor="#ff7a4d" stopOpacity="0.4" />
             </radialGradient>
           </defs>
-          {/* Luna/Sol */}
           <circle cx="200" cy="150" r="80" fill="url(#sunGradient)" />
-          {/* Estrellas */}
           {[...Array(15)].map((_, i) => (
             <circle
               key={i}
@@ -95,9 +84,7 @@ export function LoginForm() {
         </svg>
       </div>
 
-      {/* Contenedor principal */}
       <div className="relative flex min-h-screen flex-col items-center justify-center px-4 py-8 sm:px-6 lg:px-8">
-        {/* Formulario de login */}
         <div className="w-full max-w-md space-y-8">
           <div className="rounded-2xl border border-white/10 bg-white/5 p-8 backdrop-blur-md shadow-2xl">
             <div className="mb-6 space-y-3 text-center">
@@ -155,36 +142,18 @@ export function LoginForm() {
               {message && <p className="text-sm text-purple-100">{message}</p>}
             </form>
 
-            <div className="mt-6 space-y-3">
-              <p className="text-center text-sm font-medium text-white">Usuarios demo</p>
-              <div className="grid gap-2 sm:grid-cols-3">
-                {demoUsers.map((user) => (
-                  <Button
-                    key={user.username}
-                    type="button"
-                    variant="outline"
-                    className="h-auto flex-col items-start gap-1 border-white/20 bg-white/5 p-2 text-left text-xs hover:bg-white/10"
-                    onClick={() => {
-                      setUsername(user.username);
-                      setPassword("Subastech123!");
-                      setMessage(`Listo: ${user.username}. Presiona Entrar.`);
-                    }}
-                  >
-                    <span className="text-white">{user.role}</span>
-                    <span className="text-purple-300">{user.username}</span>
-                  </Button>
-                ))}
-              </div>
-            </div>
-
             <div className="mt-6 border-t border-white/10 pt-4 text-center text-xs text-purple-200">
-              <p>¿No tienes cuenta? <Link href="#" className="text-orange-400 hover:text-orange-300">Regístrate</Link></p>
+              <p>
+                ¿No tienes cuenta?{" "}
+                <Link href="/register" className="text-orange-400 hover:text-orange-300">
+                  Regístrate
+                </Link>
+              </p>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Sección de descripción con scroll */}
       <div className="relative z-10 bg-gradient-to-b from-slate-950 to-slate-900 px-4 py-16 sm:px-6 lg:px-8">
         <div className="mx-auto max-w-4xl">
           <div className="mb-16 text-center">
@@ -195,7 +164,6 @@ export function LoginForm() {
           </div>
 
           <div className="space-y-12">
-            {/* Feature principal */}
             <div className="rounded-2xl border border-purple-500/20 bg-gradient-to-br from-purple-500/10 to-pink-500/10 p-8 backdrop-blur">
               <div className="flex items-start gap-4">
                 <div className="flex size-12 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-orange-400 to-rose-500">
@@ -212,14 +180,13 @@ export function LoginForm() {
               </div>
             </div>
 
-            {/* Grid de features */}
             <div className="grid gap-6 md:grid-cols-2">
               {features.map((feature, idx) => {
                 const Icon = feature.icon;
                 return (
                   <div
                     key={idx}
-                    className="rounded-xl border border-purple-500/20 bg-purple-500/5 p-6 backdrop-blur hover:bg-purple-500/10 transition-colors"
+                    className="rounded-xl border border-purple-500/20 bg-purple-500/5 p-6 backdrop-blur transition-colors hover:bg-purple-500/10"
                   >
                     <div className="mb-3 flex size-10 items-center justify-center rounded-lg bg-gradient-to-br from-orange-400/80 to-rose-500/80">
                       <Icon className="size-5 text-white" />
@@ -230,30 +197,8 @@ export function LoginForm() {
                 );
               })}
             </div>
-
-            {/* Call to action */}
-            <div className="rounded-2xl border border-orange-500/20 bg-gradient-to-r from-orange-500/10 to-rose-500/10 p-8 text-center backdrop-blur">
-              <h3 className="mb-3 text-2xl font-bold text-white">¿Listo para comenzar?</h3>
-              <p className="mb-6 text-purple-200">
-                Inicia sesión con tu usuario y descubre cómo SubasTech simplifica la búsqueda y reserva de servicios técnicos.
-              </p>
-              <div className="flex flex-col gap-3 sm:flex-row sm:justify-center">
-                <Button
-                  onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-                  className="bg-gradient-to-r from-orange-400 to-rose-500 font-semibold text-white hover:from-orange-500 hover:to-rose-600"
-                >
-                  Ir al login
-                </Button>
-                <Link href="/demo">
-                  <Button variant="outline" className="w-full border-white/20 text-white hover:bg-white/10 sm:w-auto">
-                    Ver demo
-                  </Button>
-                </Link>
-              </div>
-            </div>
           </div>
 
-          {/* Footer */}
           <div className="mt-16 border-t border-white/10 pt-8 text-center text-sm text-purple-300">
             <p>© 2026 SubasTech. Todos los derechos reservados.</p>
           </div>
