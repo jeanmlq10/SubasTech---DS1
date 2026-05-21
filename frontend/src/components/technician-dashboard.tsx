@@ -19,7 +19,6 @@ import {
 
 import { API_URL, Auction, Category, Dispute, OnboardingResponse, Rating, TechnicianLead, TechnicianService } from "@/lib/api";
 import { clearStoredAuth, restoreSession } from "@/lib/auth";
-import { MobileRoleNav } from "@/components/mobile-role-nav";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -1039,7 +1038,6 @@ export function TechnicianDashboard() {
           </CardContent>
         </Card>
       </main>
-      <MobileRoleNav />
     </div>
   );
 }

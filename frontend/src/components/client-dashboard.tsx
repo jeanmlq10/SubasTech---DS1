@@ -6,7 +6,6 @@ import { Calendar, ClipboardList, LayoutDashboard, LogOut, MessageCircle, Settin
 
 import { API_URL, Appointment, Auction, Category, Dispute, Rating, Zone } from "@/lib/api";
 import { clearStoredAuth, restoreSession, roleHome } from "@/lib/auth";
-import { MobileRoleNav } from "@/components/mobile-role-nav";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -752,7 +751,6 @@ export function ClientDashboard() {
           </section>
         </main>
       </div>
-      <MobileRoleNav />
     </div>
   );
 }
