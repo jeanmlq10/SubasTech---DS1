@@ -86,6 +86,12 @@ export function ClientDashboard() {
   }, [router]);
 
   useEffect(() => {
+    if (!token) return;
+    const interval = setInterval(() => void loadClientData(token), 30_000);
+    return () => clearInterval(interval);
+  }, [token]);
+
+  useEffect(() => {
     if (isBooting || appointments.length === 0) return;
     const params = new URLSearchParams(window.location.search);
     const rateId = params.get("rate");

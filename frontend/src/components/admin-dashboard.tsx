@@ -76,7 +76,8 @@ export function AdminDashboard() {
       const session = await restoreSession();
       if (mounted && session) {
         setToken(session.accessToken);
-        setMessage(`Sesion activa como ${session.user.username} (${session.user.role}). Puedes sincronizar el panel.`);
+        setMessage(`Sesion activa como ${session.user.username} (${session.user.role}).`);
+        await loadSummary();
       }
     })();
     void loadCatalog();
@@ -85,6 +86,12 @@ export function AdminDashboard() {
       mounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!token) return;
+    const interval = setInterval(() => void loadSummary(), 30_000);
+    return () => clearInterval(interval);
+  }, [token]);
 
   function logout() {
     clearStoredAuth();

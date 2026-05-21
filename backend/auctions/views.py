@@ -43,6 +43,8 @@ class AuctionViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if user.role != User.Role.CLIENT and not _is_admin(user):
             raise PermissionDenied("Only clients can create auctions.")
+        if getattr(user, "auction_blocked", False) and not _is_admin(user):
+            raise PermissionDenied("Tu cuenta tiene restringida la creación de subastas por disputas perdidas.")
         serializer.save(client=user, source=Auction.Source.DASHBOARD, status=Auction.Status.OPEN)
 
     def perform_update(self, serializer):

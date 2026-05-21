@@ -213,6 +213,12 @@ export function TechnicianDashboard() {
     };
   }, [loadWorkspace, router]);
 
+  useEffect(() => {
+    if (!token) return;
+    const interval = setInterval(() => void loadWorkspace(token), 30_000);
+    return () => clearInterval(interval);
+  }, [token, loadWorkspace]);
+
   async function submitService(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!token) {
@@ -374,6 +380,10 @@ export function TechnicianDashboard() {
       setMessage("Ingresa el valor de tu oferta.");
       return;
     }
+    if (draft.availableFrom && new Date(draft.availableFrom) <= new Date()) {
+      setMessage("El horario propuesto debe ser una fecha y hora futura.");
+      return;
+    }
 
     setStatus("loading");
     try {
@@ -453,14 +463,6 @@ export function TechnicianDashboard() {
               </p>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
-              <Button
-                onClick={() => void loadWorkspace(token)}
-                disabled={isLoading}
-                className="bg-gradient-to-r from-orange-400 to-rose-500 font-semibold text-white hover:from-orange-500 hover:to-rose-600"
-              >
-                {isLoading ? <Loader2 className="mr-2 size-4 animate-spin" /> : <RefreshCw className="mr-2 size-4" />}
-                Sincronizar
-              </Button>
               <Button
                 variant="ghost"
                 onClick={logout}
@@ -577,6 +579,7 @@ export function TechnicianDashboard() {
                         <Input
                           type="datetime-local"
                           value={draft.availableFrom}
+                          min={new Date().toISOString().slice(0, 16)}
                           onChange={(event) =>
                             setBidDrafts((current) => ({ ...current, [auction.id]: { ...draft, availableFrom: event.target.value } }))
                           }
