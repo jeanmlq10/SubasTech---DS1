@@ -135,6 +135,66 @@ def _reset_session(session: ChatSession) -> None:
     _update_session(session, step="initial", state_data={})
 
 
+def _handle_rating_submission(session: ChatSession, text: str, state: dict) -> str:
+    """Process a numeric rating reply (expects 0-5) and persist it to the reputation system.
+
+    The session.state_data is expected to contain `awaiting_rating_for` with
+    the appointment id.
+    """
+    cleaned = (text or "").strip()
+    # Try to extract a single digit number between 0 and 5
+    m = re.search(r"\b([0-5])\b", cleaned)
+    if not m:
+        return "Por favor responde con un numero entre 0 y 5 (ej: 5)."
+
+    try:
+        score = int(m.group(1))
+    except ValueError:
+        return "Entrada invalida. Responde con un numero del 0 al 5."
+
+    appointment_id = state.get("awaiting_rating_for")
+    if not appointment_id:
+        _reset_session(session)
+        return "No encuentro la solicitud asociada a esta calificacion. Intenta de nuevo desde el dashboard o solicita el enlace." 
+
+    if session.user is None:
+        return (
+            "Para registrar la calificación debes vincular tu cuenta. "
+            "Visita el dashboard o envia /link desde la app para asociar tu usuario."
+        )
+
+    # Create the rating record
+    try:
+        from reputation.models import Rating
+        from reputation.services import refresh_technician_reputation
+
+        appointment = Appointment.objects.select_related("technician", "service", "lead").filter(pk=appointment_id).first()
+        if not appointment:
+            _reset_session(session)
+            return "No se encontro la cita. Verifica e intenta nuevamente."
+
+        Rating.objects.create(
+            author=session.user,
+            technician=appointment.technician,
+            service=appointment.service,
+            lead=appointment.lead,
+            target_role=Rating.TargetRole.TECHNICIAN,
+            score=score,
+        )
+
+        # Refresh aggregated reputation metrics for the technician
+        try:
+            refresh_technician_reputation(appointment.technician)
+        except Exception:
+            logger.exception("Failed to refresh reputation for technician %s", appointment.technician_id)
+
+        _reset_session(session)
+        return f"Gracias. Tu calificacion de {score} fue registrada."
+    except Exception as exc:
+        logger.exception("Error saving rating from telegram: %s", exc)
+        return "No pude registrar tu calificacion ahora. Intenta nuevamente mas tarde."
+
+
 def _build_welcome_message() -> str:
     return (
         "Hola, soy el asistente de SubasTech.\n\n"
@@ -336,6 +396,9 @@ def handle_conversation(session: ChatSession, text: str, intent: dict) -> str:
     if lowered in RESET_CHOICES:
         _reset_session(session)
         return _build_welcome_message()
+
+    if step == "waiting_rating":
+        return _handle_rating_submission(session, cleaned_text, state)
 
     if _is_bid_acceptance(cleaned_text):
         return _handle_bid_acceptance(session, cleaned_text)
