@@ -145,13 +145,13 @@ export function TechnicianDashboard() {
           "Content-Type": "application/json",
         };
         const [onboardingResponse, categoryResponse, servicesResponse, leadsResponse, auctionsResponse, ratingsResponse, disputesResponse] = await Promise.all([
-          fetch(`${API_URL}/technician/onboarding/`, { headers: requestHeaders }),
-          fetch(`${API_URL}/categories/`),
-          fetch(`${API_URL}/technician/services/`, { headers: requestHeaders }),
-          fetch(`${API_URL}/technician/leads/`, { headers: requestHeaders }),
-          fetch(`${API_URL}/auctions/`, { headers: requestHeaders }),
-          fetch(`${API_URL}/ratings/`, { headers: requestHeaders }),
-          fetch(`${API_URL}/disputes/`, { headers: requestHeaders }),
+          fetch(`${API_URL}/technician/onboarding/`, { headers: requestHeaders, cache: "no-store" }),
+          fetch(`${API_URL}/categories/`, { cache: "no-store" }),
+          fetch(`${API_URL}/technician/services/`, { headers: requestHeaders, cache: "no-store" }),
+          fetch(`${API_URL}/technician/leads/`, { headers: requestHeaders, cache: "no-store" }),
+          fetch(`${API_URL}/auctions/`, { headers: requestHeaders, cache: "no-store" }),
+          fetch(`${API_URL}/ratings/`, { headers: requestHeaders, cache: "no-store" }),
+          fetch(`${API_URL}/disputes/`, { headers: requestHeaders, cache: "no-store" }),
         ]);
 
         if (
@@ -252,30 +252,7 @@ export function TechnicianDashboard() {
     }
   }
 
-  async function updateLeadStatus(leadId: number, leadStatus: TechnicianLead["status"]) {
-    if (!token) {
-      setMessage("Inicia sesion antes de actualizar leads.");
-      return;
-    }
-
-    setStatus("loading");
-    try {
-      const response = await fetch(`${API_URL}/technician/leads/${leadId}/status/`, {
-        method: "POST",
-        headers: authHeaders,
-        body: JSON.stringify({ status: leadStatus }),
-      });
-      if (!response.ok) {
-        throw new Error("Lead status request failed");
-      }
-      await loadWorkspace(token);
-      setStatus("success");
-      setMessage("Lead actualizado.");
-    } catch {
-      setStatus("error");
-      setMessage("No se pudo actualizar el lead.");
-    }
-  }
+  // Lead status actions removed from the technician dashboard UI.
 
   async function notifyOnTheWay(appointmentId: number) {
     if (!token) return;
@@ -284,6 +261,7 @@ export function TechnicianDashboard() {
       const response = await fetch(`${API_URL}/appointments/${appointmentId}/on_the_way/`, {
         method: "POST",
         headers: authHeaders,
+        cache: "no-store",
         body: JSON.stringify({}),
       });
       if (!response.ok) throw new Error("Request failed");
@@ -303,6 +281,7 @@ export function TechnicianDashboard() {
       const response = await fetch(`${API_URL}/appointments/${appointmentId}/arrived/`, {
         method: "POST",
         headers: authHeaders,
+        cache: "no-store",
         body: JSON.stringify({}),
       });
       if (!response.ok) throw new Error("Request failed");
@@ -326,6 +305,7 @@ export function TechnicianDashboard() {
       const response = await fetch(`${API_URL}/appointments/${appointmentId}/complete/`, {
         method: "POST",
         headers: authHeaders,
+        cache: "no-store",
         body: JSON.stringify({}),
       });
       if (!response.ok) {
@@ -734,32 +714,6 @@ export function TechnicianDashboard() {
                       ) : null}
 
                       <div className="mt-2 grid gap-2 sm:grid-cols-4">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="border border-white/10 text-purple-100 hover:bg-white/10 hover:text-white"
-                          onClick={() => void updateLeadStatus(lead.id, "contacted")}
-                          disabled={isLoading}
-                        >
-                          Contactado
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="border border-white/10 text-purple-100 hover:bg-white/10 hover:text-white"
-                          onClick={() => void updateLeadStatus(lead.id, "accepted")}
-                          disabled={isLoading}
-                        >
-                          Aceptado
-                        </Button>
-                        <Button
-                          size="sm"
-                          className="bg-gradient-to-r from-orange-400 to-rose-500 font-semibold text-white hover:from-orange-500 hover:to-rose-600"
-                          onClick={() => void updateLeadStatus(lead.id, "closed")}
-                          disabled={isLoading}
-                        >
-                          Cerrar lead
-                        </Button>
                         {appointment ? (
                           <Button
                             size="sm"
@@ -774,75 +728,6 @@ export function TechnicianDashboard() {
                     </div>
                   );
                 })
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className={`${surfaceClass} border-white/10 bg-white/5 text-white`}>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-3 text-white">
-              <span className="rounded-xl bg-white/10 p-2 text-orange-200">
-                <ClipboardList className="size-5" />
-              </span>
-              Disputas asociadas
-            </CardTitle>
-            <CardDescription className="text-purple-200">
-              Revisa reclamos abiertos por clientes y agrega tu version para el arbitro.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Separator className="mb-5 bg-white/10" />
-            <div className="grid gap-4">
-              {disputes.length === 0 ? (
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-5 text-center text-sm text-purple-100">
-                  No tienes disputas asociadas.
-                </div>
-              ) : (
-                disputes.map((dispute) => (
-                  <div key={dispute.id} className="rounded-2xl border border-white/10 bg-white/[0.07] p-5 shadow-lg">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div>
-                        <p className="text-xs uppercase tracking-[0.24em] text-orange-200">Disputa #{dispute.id}</p>
-                        <h3 className="mt-2 text-xl font-semibold text-white">{dispute.title}</h3>
-                        <p className="mt-2 text-sm leading-6 text-purple-100">{dispute.description}</p>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        <Badge className="border-white/10 bg-white/10 text-purple-100 hover:bg-white/10">
-                          {disputeStatusLabel[dispute.status]}
-                        </Badge>
-                        <Badge className="border-white/10 bg-white/10 text-purple-100 hover:bg-white/10">
-                          {disputeDecisionLabel[dispute.decision]}
-                        </Badge>
-                      </div>
-                    </div>
-                    {dispute.ai_summary ? <p className="mt-3 text-sm text-purple-200">Resumen IA: {dispute.ai_summary}</p> : null}
-                    {dispute.arbiter_notes ? <p className="mt-3 text-sm text-orange-100">Decision arbitro: {dispute.arbiter_notes}</p> : null}
-                    <div className="mt-4 rounded-xl border border-white/10 bg-slate-950/20 p-4">
-                      <p className="text-sm font-medium text-white">Evidencia registrada</p>
-                      {dispute.evidence.length === 0 ? (
-                        <p className="mt-2 text-sm text-purple-200">Sin evidencia adicional.</p>
-                      ) : (
-                        <div className="mt-2 grid gap-2">
-                          {dispute.evidence.map((item) => (
-                            <p key={item.id} className="rounded-lg bg-white/5 p-2 text-sm text-purple-100">
-                              {item.note || "Archivo adjunto"}
-                            </p>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="mt-4 border border-white/10 text-purple-100 hover:bg-white/10 hover:text-white"
-                      disabled={isLoading || dispute.status === "resolved"}
-                      onClick={() => void addDisputeEvidence(dispute.id)}
-                    >
-                      Agregar evidencia
-                    </Button>
-                  </div>
-                ))
               )}
             </div>
           </CardContent>

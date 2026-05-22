@@ -136,21 +136,21 @@ def _reset_session(session: ChatSession) -> None:
 
 
 def _handle_rating_submission(session: ChatSession, text: str, state: dict) -> str:
-    """Process a numeric rating reply (expects 0-5) and persist it to the reputation system.
+    """Process a rating reply in the form `score [comment]` and persist it.
 
     The session.state_data is expected to contain `awaiting_rating_for` with
     the appointment id.
     """
     cleaned = (text or "").strip()
-    # Try to extract a single digit number between 0 and 5
-    m = re.search(r"\b([0-5])\b", cleaned)
-    if not m:
-        return "Por favor responde con un numero entre 0 y 5 (ej: 5)."
+    match = re.fullmatch(r"([0-5])(?:\s+(.+))?", cleaned)
+    if not match:
+        return (
+            "Por favor responde con un numero entero entre 0 y 5 seguido de un comentario opcional.\n"
+            "Por ejemplo: 4 Muy buen servicio."
+        )
 
-    try:
-        score = int(m.group(1))
-    except ValueError:
-        return "Entrada invalida. Responde con un numero del 0 al 5."
+    score = int(match.group(1))
+    comment = (match.group(2) or "").strip()
 
     appointment_id = state.get("awaiting_rating_for")
     if not appointment_id:
@@ -180,6 +180,7 @@ def _handle_rating_submission(session: ChatSession, text: str, state: dict) -> s
             lead=appointment.lead,
             target_role=Rating.TargetRole.TECHNICIAN,
             score=score,
+            comment=comment,
         )
 
         # Refresh aggregated reputation metrics for the technician
@@ -189,7 +190,9 @@ def _handle_rating_submission(session: ChatSession, text: str, state: dict) -> s
             logger.exception("Failed to refresh reputation for technician %s", appointment.technician_id)
 
         _reset_session(session)
-        return f"Gracias. Tu calificacion de {score} fue registrada."
+        if comment:
+            return f"Gracias. Tu calificación de {score} y tu comentario fueron registrados."
+        return f"Gracias. Tu calificación de {score} fue registrada."
     except Exception as exc:
         logger.exception("Error saving rating from telegram: %s", exc)
         return "No pude registrar tu calificacion ahora. Intenta nuevamente mas tarde."
