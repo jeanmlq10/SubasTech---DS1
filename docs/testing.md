@@ -1,13 +1,20 @@
 # Testing strategy
 
-This repo uses a layered testing setup for the `staging` branch.
+This repo uses a layered testing setup for the `staging` branch and a split GitHub Actions pipeline.
 
 ## Backend
 
-Run Django checks and tests:
+Run the full Django test suite:
 
 ```bash
 scripts/run-backend-tests.sh
+```
+
+Run one app in isolation:
+
+```bash
+cd backend
+USE_SQLITE_FOR_TESTS=true python manage.py test accounts
 ```
 
 Coverage priorities:
@@ -58,11 +65,17 @@ Current e2e coverage:
 
 ## CI
 
-GitHub Actions runs on pull requests and pushes to `staging`:
+GitHub Actions now uses three workflows:
 
-- backend Django tests
+- `ci-pipeline.yml`: main entrypoint for pushes and pull requests to `staging`
+- `individual-backend-tests.yml`: reusable/manual workflow that runs one Django app per matrix job
+- `e2e-tests.yml`: reusable/manual Playwright workflow with uploaded reports and traces
+
+The main CI pipeline runs:
+
+- backend Django tests split by app
 - frontend lint and build
-- Playwright e2e tests with Chromium
+- Playwright e2e tests with Chromium after backend and frontend succeed
 
 Next recommended additions:
 
