@@ -418,7 +418,7 @@ def _start_booking_flow(session: ChatSession, text: str, intent: dict) -> str:
         session,
         step="waiting_technician_selection",
         state_data={
-            "request_text": text,
+            "request_text": _meaningful_request_text(text, category, location),
             "categoria": category,
             "zona": location,
             "recommendations": recommendations,
@@ -448,7 +448,7 @@ def _handle_zone_selection(session: ChatSession, text: str, state: dict) -> str:
         session,
         step="waiting_technician_selection",
         state_data={
-            "request_text": state.get("request_text", ""),
+            "request_text": _meaningful_request_text(state.get("request_text", ""), category, selected_zone),
             "categoria": category,
             "zona": selected_zone,
             "recommendations": recommendations,
@@ -624,6 +624,10 @@ def _create_auction_from_chat(session: ChatSession, state: dict) -> str:
     if session.user_id is None:
         _ensure_client_user(session, state)
 
+    if getattr(session.user, "auction_blocked", False):
+        _reset_session(session)
+        return "Tu cuenta tiene restringida la creación de subastas por disputas perdidas. Contacta con soporte para resolverlo."
+
     category = _resolve_auction_category(state)
     if category is None:
         _reset_session(session)
@@ -749,6 +753,22 @@ def _technician_name_matches(bid: Bid, raw_name: str) -> bool:
 
 def _bid_technician_name(bid: Bid) -> str:
     return bid.technician.user.get_full_name() or bid.technician.user.username
+
+
+def _meaningful_request_text(text: str, category: str | None, zone: str | None) -> str:
+    """Return a human-readable request description.
+
+    When the user selected via number or typed only a short keyword, the raw
+    text carries no useful context. In that case we build a description from
+    the resolved category and zone instead.
+    """
+    cleaned = (text or "").strip()
+    is_trivial = not cleaned or cleaned.isdigit() or (len(cleaned.split()) == 1 and len(cleaned) <= 20)
+    if is_trivial:
+        category_name = CATEGORY_DISPLAY_NAMES.get(category or "", category or "Servicio tecnico")
+        zone_name = ZONE_DISPLAY_NAMES.get(zone or "", zone or "")
+        return f"Solicitud de {category_name}" + (f" en {zone_name}" if zone_name else "")
+    return cleaned
 
 
 def _normalize_match_text(value: str) -> str:

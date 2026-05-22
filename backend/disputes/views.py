@@ -16,6 +16,19 @@ from .serializers import ArbiterDecisionSerializer, ArbiterDisputeSerializer, Di
 from .services import summarize_dispute
 
 
+DISPUTE_STRIKE_THRESHOLD = 3
+
+
+def _apply_client_dispute_strike(dispute: "Dispute") -> None:
+    if dispute.decision != Dispute.Decision.FAVOR_TECHNICIAN:
+        return
+    client = dispute.client
+    client.dispute_strikes = (client.dispute_strikes or 0) + 1
+    if client.dispute_strikes >= DISPUTE_STRIKE_THRESHOLD:
+        client.auction_blocked = True
+    client.save(update_fields=["dispute_strikes", "auction_blocked"])
+
+
 class DisputeViewSet(viewsets.ModelViewSet):
     queryset = Dispute.objects.all()
     serializer_class = DisputeSerializer
@@ -123,6 +136,7 @@ class ArbiterDecisionAPIView(APIView):
             notes=serializer.validated_data.get("notes", ""),
         )
         evaluate_automatic_penalties(dispute.technician)
+        _apply_client_dispute_strike(dispute)
         log_audit_event(
             event_type=AuditEvent.EventType.DISPUTE_RESOLVED,
             actor=request.user,
@@ -131,7 +145,12 @@ class ArbiterDecisionAPIView(APIView):
             entity_id=dispute.id,
             status="success",
             message="Dispute resolved by arbiter",
-            metadata={"decision": dispute.decision, "technician_id": dispute.technician_id},
+            metadata={
+                "decision": dispute.decision,
+                "technician_id": dispute.technician_id,
+                "client_strikes": dispute.client.dispute_strikes,
+                "client_blocked": dispute.client.auction_blocked,
+            },
         )
         return Response(ArbiterDisputeSerializer(dispute).data)
 

@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Bot, CheckCircle2, ClipboardCheck, Loader2, LogOut, RefreshCw, Scale } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { AlertTriangle, Bot, CheckCircle2, ClipboardCheck, LogOut, Scale } from "lucide-react";
 
 import { clearStoredAuth, restoreSession } from "@/lib/auth";
 import { API_URL, ArbiterDispute, ArbiterQueue } from "@/lib/api";
@@ -29,6 +30,7 @@ const ghostButtonClass = "border border-white/10 text-purple-100 hover:bg-white/
 const primaryButtonClass = "bg-gradient-to-r from-orange-400 to-rose-500 font-semibold text-white hover:from-orange-500 hover:to-rose-600";
 
 export function ArbiterDashboard() {
+  const router = useRouter();
   const [token, setToken] = useState("");
   const [queue, setQueue] = useState<ArbiterQueue>(emptyQueue);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -44,7 +46,8 @@ export function ArbiterDashboard() {
       const session = await restoreSession();
       if (mounted && session) {
         setToken(session.accessToken);
-        setMessage(`Sesion activa como ${session.user.username} (${session.user.role}). Puedes sincronizar el panel.`);
+        setMessage(`Sesion activa como ${session.user.username} (${session.user.role}).`);
+        await loadQueue();
       }
     })();
 
@@ -53,10 +56,16 @@ export function ArbiterDashboard() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!token) return;
+    const interval = setInterval(() => void loadQueue(), 30_000);
+    return () => clearInterval(interval);
+  }, [token]);
+
   function logout() {
     clearStoredAuth();
     setToken("");
-    setMessage("Sesion cerrada. Inicia sesion en /login o pega un token arbitro manual.");
+    router.replace("/login");
   }
 
   const selectedDispute = useMemo(
@@ -146,10 +155,6 @@ export function ArbiterDashboard() {
               </p>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
-              <Button onClick={loadQueue} disabled={isLoading} className={primaryButtonClass}>
-                {isLoading ? <Loader2 className="mr-2 size-4 animate-spin" /> : <RefreshCw className="mr-2 size-4" />}
-                Sincronizar
-              </Button>
               <Button variant="ghost" onClick={logout} disabled={isLoading} className={ghostButtonClass}>
                 <LogOut className="mr-2 size-4" />
                 Cerrar sesion

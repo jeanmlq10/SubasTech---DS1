@@ -1,3 +1,4 @@
+from django.utils import timezone
 from rest_framework import serializers
 
 from accounts.models import User
@@ -65,6 +66,9 @@ class BidSerializer(serializers.ModelSerializer):
         auction = attrs.get("auction")
         if auction and auction.source == Auction.Source.TELEGRAM and attrs.get("available_from") is None:
             raise serializers.ValidationError({"available_from": "Telegram auctions require a proposed appointment time."})
+        available_from = attrs.get("available_from")
+        if available_from is not None and available_from <= timezone.now():
+            raise serializers.ValidationError({"available_from": "El horario propuesto debe ser una fecha y hora futura."})
         return attrs
 
 
