@@ -245,7 +245,8 @@ class AppointmentViewSet(viewsets.ModelViewSet):
             updated,
             (
                 f"Servicio completado por {technician_name}.\n\n"
-                "Por favor, responde en este chat con un numero del 0 al 5 para calificar a tu tecnico."
+                "Por favor, responde en este chat con un numero entre 0 y 5 seguido de un comentario opcional, por ejemplo:\n"
+                "4 Muy buen servicio."
             ),
         )
         # If client has a telegram session, put it into a waiting_rating state so
