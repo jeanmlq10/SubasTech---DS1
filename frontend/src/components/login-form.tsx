@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2, LogIn, MessageCircle, Gauge, Calendar, ClipboardList } from "lucide-react";
 
 import { linkTelegramChat, loginWithPassword, restoreSession, roleHome } from "@/lib/auth";
@@ -40,34 +40,46 @@ export function LoginForm() {
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState("Ingresa con tu correo o usuario para abrir el panel correspondiente a tu rol.");
+  const [message, setMessage] = useState("");
+  const [isError, setIsError] = useState(false);
 
   useEffect(() => {
     let mounted = true;
 
     void (async () => {
       const session = await restoreSession();
-      if (mounted && session) {
-        setMessage(`Sesion activa como ${session.user.username}. Puedes continuar a tu dashboard.`);
+      if (!mounted) return;
+      if (session) {
+        router.replace(roleHome(session.user.role));
       }
     })();
 
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [router]);
 
-  async function submitLogin(event: FormEvent<HTMLFormElement>) {
+  async function submitLogin(event: { preventDefault(): void }) {
     event.preventDefault();
     setLoading(true);
+    setIsError(false);
+    setMessage("");
     try {
       const session = await loginWithPassword(identifier, password);
       if (telegramChatId && session.user.role === "client") {
         await linkTelegramChat(session.accessToken, telegramChatId);
       }
-      router.push(roleHome(session.user.role));
-    } catch {
-      setMessage("No se pudo iniciar sesion. Revisa correo/usuario, clave y backend.");
+      router.replace(roleHome(session.user.role));
+    } catch (err) {
+      setIsError(true);
+      const msg = err instanceof Error ? err.message : "";
+      if (msg === "invalid_credentials") {
+        setMessage("Correo/usuario o contraseña incorrectos.");
+      } else if (msg === "server_error") {
+        setMessage("Error en el servidor. Intenta de nuevo en unos momentos.");
+      } else {
+        setMessage("No se pudo iniciar sesion. Verifica tu conexion e intenta de nuevo.");
+      }
     } finally {
       setLoading(false);
     }
@@ -152,7 +164,9 @@ export function LoginForm() {
                 {loading ? <Loader2 className="mr-2 size-4 animate-spin" /> : <LogIn className="mr-2 size-4" />}
                 Entrar
               </Button>
-              {message && <p className="text-sm text-purple-100">{message}</p>}
+              {message && (
+                <p className={`text-sm ${isError ? "text-rose-300" : "text-purple-100"}`}>{message}</p>
+              )}
             </form>
 
             <div className="mt-6 border-t border-white/10 pt-4 text-center text-xs text-purple-200">

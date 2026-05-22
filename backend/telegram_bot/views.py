@@ -36,6 +36,9 @@ from notifications.models import Notification
 from notifications.services import build_telegram_message_payload, create_notification
 from recommendations.services import RecommendationRequest, recommend_services
 
+from payments.models import EscrowPayment
+from payments.services import create_escrow_for_awarded_bid, mark_deposit_paid, mark_remaining_paid
+
 from .ai import extract_intent
 from .client import TelegramBotClient
 from .models import ChatSession, ConversationMessage
@@ -133,6 +136,69 @@ def _update_session(session: ChatSession, *, step: str, state_data: dict | None 
 
 def _reset_session(session: ChatSession) -> None:
     _update_session(session, step="initial", state_data={})
+
+
+def _handle_rating_submission(session: ChatSession, text: str, state: dict) -> str:
+    """Process a rating reply in the form `score [comment]` and persist it.
+
+    The session.state_data is expected to contain `awaiting_rating_for` with
+    the appointment id.
+    """
+    cleaned = (text or "").strip()
+    match = re.fullmatch(r"([0-5])(?:\s+(.+))?", cleaned)
+    if not match:
+        return (
+            "Por favor responde con un numero entero entre 0 y 5 seguido de un comentario opcional.\n"
+            "Por ejemplo: 4 Muy buen servicio."
+        )
+
+    score = int(match.group(1))
+    comment = (match.group(2) or "").strip()
+
+    appointment_id = state.get("awaiting_rating_for")
+    if not appointment_id:
+        _reset_session(session)
+        return "No encuentro la solicitud asociada a esta calificacion. Intenta de nuevo desde el dashboard o solicita el enlace." 
+
+    if session.user is None:
+        return (
+            "Para registrar la calificación debes vincular tu cuenta. "
+            "Visita el dashboard o envia /link desde la app para asociar tu usuario."
+        )
+
+    # Create the rating record
+    try:
+        from reputation.models import Rating
+        from reputation.services import refresh_technician_reputation
+
+        appointment = Appointment.objects.select_related("technician", "service", "lead").filter(pk=appointment_id).first()
+        if not appointment:
+            _reset_session(session)
+            return "No se encontro la cita. Verifica e intenta nuevamente."
+
+        Rating.objects.create(
+            author=session.user,
+            technician=appointment.technician,
+            service=appointment.service,
+            lead=appointment.lead,
+            target_role=Rating.TargetRole.TECHNICIAN,
+            score=score,
+            comment=comment,
+        )
+
+        # Refresh aggregated reputation metrics for the technician
+        try:
+            refresh_technician_reputation(appointment.technician)
+        except Exception:
+            logger.exception("Failed to refresh reputation for technician %s", appointment.technician_id)
+
+        _reset_session(session)
+        if comment:
+            return f"Gracias. Tu calificación de {score} y tu comentario fueron registrados."
+        return f"Gracias. Tu calificación de {score} fue registrada."
+    except Exception as exc:
+        logger.exception("Error saving rating from telegram: %s", exc)
+        return "No pude registrar tu calificacion ahora. Intenta nuevamente mas tarde."
 
 
 def _build_welcome_message() -> str:
@@ -337,8 +403,14 @@ def handle_conversation(session: ChatSession, text: str, intent: dict) -> str:
         _reset_session(session)
         return _build_welcome_message()
 
+    if step == "waiting_rating":
+        return _handle_rating_submission(session, cleaned_text, state)
+
     if _is_bid_acceptance(cleaned_text):
         return _handle_bid_acceptance(session, cleaned_text)
+
+    if _is_payment_command(cleaned_text):
+        return _handle_payment_command(session, cleaned_text)
 
     if accion == "saludo" or lowered in {"/start", "hola", "buenas", "buenos dias"}:
         _reset_session(session)
@@ -384,7 +456,10 @@ def handle_conversation(session: ChatSession, text: str, intent: dict) -> str:
         "- Necesito un electricista en Riomar\n"
         "- Quiero cancelar mi cita\n"
         "- Cancelar mi subasta\n"
-        "- Reagendar mi cita"
+        "- Reagendar mi cita\n"
+        "- PAGAR RESERVA\n"
+        "- PAGAR RESTANTE\n"
+        "- ESTADO PAGO"
     )
 
 
@@ -418,7 +493,7 @@ def _start_booking_flow(session: ChatSession, text: str, intent: dict) -> str:
         session,
         step="waiting_technician_selection",
         state_data={
-            "request_text": text,
+            "request_text": _meaningful_request_text(text, category, location),
             "categoria": category,
             "zona": location,
             "recommendations": recommendations,
@@ -448,7 +523,7 @@ def _handle_zone_selection(session: ChatSession, text: str, state: dict) -> str:
         session,
         step="waiting_technician_selection",
         state_data={
-            "request_text": state.get("request_text", ""),
+            "request_text": _meaningful_request_text(state.get("request_text", ""), category, selected_zone),
             "categoria": category,
             "zona": selected_zone,
             "recommendations": recommendations,
@@ -624,6 +699,10 @@ def _create_auction_from_chat(session: ChatSession, state: dict) -> str:
     if session.user_id is None:
         _ensure_client_user(session, state)
 
+    if getattr(session.user, "auction_blocked", False):
+        _reset_session(session)
+        return "Tu cuenta tiene restringida la creación de subastas por disputas perdidas. Contacta con soporte para resolverlo."
+
     category = _resolve_auction_category(state)
     if category is None:
         _reset_session(session)
@@ -730,6 +809,19 @@ def _handle_bid_acceptance(session: ChatSession, text: str) -> str:
         return "No pude aceptar esa oferta porque el horario ya no esta disponible. Espera otra oferta o crea una nueva subasta."
 
     _reset_session(session)
+
+    payment = EscrowPayment.objects.filter(appointment=appointment).first()
+    payment_summary = ""
+    if payment:
+        payment_summary = (
+            f"\n\n--- Pago de reserva requerido ---\n"
+            f"Valor total: ${int(payment.total_amount):,}".replace(",", ".")
+            + f"\nReserva 10%: ${int(payment.deposit_amount):,}".replace(",", ".")
+            + f"\nSaldo restante 90%: ${int(payment.remaining_amount):,}".replace(",", ".")
+            + f"\nEstado: pendiente de pago inicial\n\n"
+            "Para simular el pago de reserva responde:\nPAGAR RESERVA"
+        )
+
     return (
         "Oferta aceptada y cita creada.\n\n"
         f"Tecnico: {_bid_technician_name(bid)}\n"
@@ -737,6 +829,7 @@ def _handle_bid_acceptance(session: ChatSession, text: str) -> str:
         f"Horario: {_format_local_datetime(appointment.scheduled_start)} - {_format_local_time(appointment.scheduled_end)}\n"
         f"Direccion/zona: {auction.location or (auction.zone.name if auction.zone else 'Sin zona')}\n"
         f"Numero de cita: {appointment.id}"
+        + payment_summary
     )
 
 
@@ -749,6 +842,111 @@ def _technician_name_matches(bid: Bid, raw_name: str) -> bool:
 
 def _bid_technician_name(bid: Bid) -> str:
     return bid.technician.user.get_full_name() or bid.technician.user.username
+
+
+# ---------------------------------------------------------------------------
+# Payment commands
+# ---------------------------------------------------------------------------
+
+_PAYMENT_COMMAND_PAGAR_RESERVA = "pagar reserva"
+_PAYMENT_COMMAND_PAGAR_RESTANTE = "pagar restante"
+_PAYMENT_COMMAND_ESTADO_PAGO = "estado pago"
+
+
+def _is_payment_command(text: str) -> bool:
+    lowered = (text or "").strip().lower()
+    return lowered in {_PAYMENT_COMMAND_PAGAR_RESERVA, _PAYMENT_COMMAND_PAGAR_RESTANTE, _PAYMENT_COMMAND_ESTADO_PAGO}
+
+
+def _get_active_payment_for_session(session: ChatSession) -> "EscrowPayment | None":
+    if not session.user_id:
+        return None
+    return (
+        EscrowPayment.objects.filter(client_id=session.user_id)
+        .exclude(status__in=[EscrowPayment.Status.RELEASED, EscrowPayment.Status.REFUNDED, EscrowPayment.Status.CANCELLED])
+        .order_by("-created_at")
+        .first()
+    )
+
+
+def _payment_status_display(payment: "EscrowPayment") -> str:
+    labels = {
+        EscrowPayment.Status.PENDING_DEPOSIT: "Pendiente de reserva (10%)",
+        EscrowPayment.Status.DEPOSIT_PAID: "Reserva pagada — pendiente de completar servicio",
+        EscrowPayment.Status.SERVICE_COMPLETED: "Servicio completado — listo para pagar saldo",
+        EscrowPayment.Status.PENDING_REMAINING: "Pendiente de saldo restante (90%)",
+        EscrowPayment.Status.REMAINING_PAID: "Saldo pagado — por liberar al tecnico",
+        EscrowPayment.Status.RELEASED: "Pago liberado al tecnico",
+        EscrowPayment.Status.REFUNDED: "Pago reembolsado al cliente",
+        EscrowPayment.Status.DISPUTED: "Pago bloqueado por disputa activa",
+        EscrowPayment.Status.CANCELLED: "Pago cancelado",
+    }
+    return labels.get(payment.status, payment.status)
+
+
+def _handle_payment_command(session: ChatSession, text: str) -> str:
+    command = (text or "").strip().lower()
+    payment = _get_active_payment_for_session(session)
+
+    if payment is None:
+        return "No encontre un pago activo en tu cuenta. Primero acepta una oferta de tecnico."
+
+    if command == _PAYMENT_COMMAND_ESTADO_PAGO:
+        return (
+            f"Estado de tu pago #{payment.id}\n\n"
+            f"Valor total: ${int(payment.total_amount):,}".replace(",", ".")
+            + f"\nReserva 10%: ${int(payment.deposit_amount):,}".replace(",", ".")
+            + f"\nSaldo restante 90%: ${int(payment.remaining_amount):,}".replace(",", ".")
+            + f"\nEstado: {_payment_status_display(payment)}"
+        )
+
+    if command == _PAYMENT_COMMAND_PAGAR_RESERVA:
+        if payment.status != EscrowPayment.Status.PENDING_DEPOSIT:
+            return f"La reserva no esta pendiente. Estado actual: {_payment_status_display(payment)}"
+        try:
+            mark_deposit_paid(payment, actor=session.user)
+        except Exception as exc:
+            logger.warning("Telegram pay deposit failed: %s", exc)
+            return "No pude procesar el pago de reserva. Intentalo de nuevo."
+        return (
+            f"Reserva del 10% pagada.\n\n"
+            f"Monto pagado: ${int(payment.deposit_amount):,}".replace(",", ".")
+            + f"\nSaldo restante: ${int(payment.remaining_amount):,}".replace(",", ".")
+            + "\n\nEl tecnico ha sido notificado. Cuando el servicio termine podras pagar el saldo con:\nPAGAR RESTANTE"
+        )
+
+    if command == _PAYMENT_COMMAND_PAGAR_RESTANTE:
+        if payment.status not in {EscrowPayment.Status.SERVICE_COMPLETED, EscrowPayment.Status.PENDING_REMAINING}:
+            return f"El saldo restante aun no esta disponible para pago. Estado actual: {_payment_status_display(payment)}"
+        try:
+            mark_remaining_paid(payment, actor=session.user)
+        except Exception as exc:
+            logger.warning("Telegram pay remaining failed: %s", exc)
+            return "No pude procesar el pago del saldo. Intentalo de nuevo."
+        return (
+            f"Saldo restante del 90% pagado.\n\n"
+            f"Monto pagado: ${int(payment.remaining_amount):,}".replace(",", ".")
+            + f"\nTotal pagado: ${int(payment.total_amount):,}".replace(",", ".")
+            + "\n\nGracias! El pago sera liberado al tecnico.\nSi tienes algun inconveniente, puedes abrir una disputa desde el panel web."
+        )
+
+    return "Comando de pago no reconocido."
+
+
+def _meaningful_request_text(text: str, category: str | None, zone: str | None) -> str:
+    """Return a human-readable request description.
+
+    When the user selected via number or typed only a short keyword, the raw
+    text carries no useful context. In that case we build a description from
+    the resolved category and zone instead.
+    """
+    cleaned = (text or "").strip()
+    is_trivial = not cleaned or cleaned.isdigit() or (len(cleaned.split()) == 1 and len(cleaned) <= 20)
+    if is_trivial:
+        category_name = CATEGORY_DISPLAY_NAMES.get(category or "", category or "Servicio tecnico")
+        zone_name = ZONE_DISPLAY_NAMES.get(zone or "", zone or "")
+        return f"Solicitud de {category_name}" + (f" en {zone_name}" if zone_name else "")
+    return cleaned
 
 
 def _normalize_match_text(value: str) -> str:

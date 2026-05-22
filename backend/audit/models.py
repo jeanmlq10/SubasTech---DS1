@@ -13,6 +13,14 @@ class AuditEvent(models.Model):
         DISPUTE_RESOLVED = "dispute_resolved", "Dispute resolved"
         ADMIN_ACTION = "admin_action", "Admin action"
         INTEGRATION_ERROR = "integration_error", "Integration error"
+        PAYMENT_CREATED = "payment_created", "Payment created"
+        PAYMENT_DEPOSIT_PAID = "payment_deposit_paid", "Payment deposit paid"
+        PAYMENT_SERVICE_COMPLETED = "payment_service_completed", "Payment service completed"
+        PAYMENT_REMAINING_PAID = "payment_remaining_paid", "Payment remaining paid"
+        PAYMENT_RELEASED = "payment_released", "Payment released"
+        PAYMENT_REFUNDED = "payment_refunded", "Payment refunded"
+        PAYMENT_DISPUTED = "payment_disputed", "Payment disputed"
+        PAYMENT_CANCELLED = "payment_cancelled", "Payment cancelled"
 
     event_type = models.CharField(max_length=40, choices=EventType.choices)
     actor = models.ForeignKey(

@@ -23,6 +23,8 @@ class User(AbstractUser):
     address = models.CharField(max_length=255, blank=True)
     telegram_chat_id = models.CharField(max_length=64, unique=True, blank=True, null=True)
     whatsapp_id = models.CharField(max_length=64, unique=True, blank=True, null=True)
+    dispute_strikes = models.PositiveSmallIntegerField(default=0)
+    auction_blocked = models.BooleanField(default=False)
 
     @property
     def is_technician(self) -> bool:

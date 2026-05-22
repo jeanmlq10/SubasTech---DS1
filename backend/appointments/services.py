@@ -592,6 +592,8 @@ def complete_appointment(
         locked.status = Appointment.Status.COMPLETED
         locked.save(update_fields=["status", "updated_at"])
 
+        _mark_linked_payment_service_completed(locked, actor=actor)
+
         _sync_lead_for_appointment(locked)
         _log_lifecycle_event(
             locked,
@@ -612,6 +614,15 @@ def complete_appointment(
         refresh_technician_reputation(locked.technician)
 
     return locked
+
+
+def _mark_linked_payment_service_completed(appointment: Appointment, *, actor) -> None:
+    from payments.models import EscrowPayment
+    from payments.services import mark_service_completed
+
+    payment = EscrowPayment.objects.filter(appointment=appointment).first()
+    if payment is not None:
+        mark_service_completed(payment, actor=actor)
 
 
 def mark_no_show(

@@ -28,7 +28,7 @@ class Rating(models.Model):
     service = models.ForeignKey("catalog.Service", on_delete=models.SET_NULL, null=True, blank=True, related_name="ratings")
     lead = models.ForeignKey("leads.ServiceLead", on_delete=models.SET_NULL, null=True, blank=True, related_name="ratings")
     target_role = models.CharField(max_length=20, choices=TargetRole.choices)
-    score = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
+    score = models.PositiveSmallIntegerField(validators=[MinValueValidator(0), MaxValueValidator(5)])
     comment = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

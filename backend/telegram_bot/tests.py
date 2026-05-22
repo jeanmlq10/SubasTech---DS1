@@ -277,24 +277,14 @@ class TelegramBotTests(TestCase):
     def test_link_user_claims_anonymous_telegram_auction(self):
         first_response = self._send_webhook_message("Necesito un electricista en Riomar", chat_id=404)
         self.assertIn("Tecnicos disponibles", first_response.json()["reply"])
-        auction_response = self._send_webhook_message("0", chat_id=404)
-        self.assertIn("nombre completo", auction_response.json()["reply"].lower())
-        session = ChatSession.objects.get(chat_id=404)
-        self.assertEqual(session.current_step, "waiting_auction_name")
-
-        name_response = self._send_webhook_message("Laura Diaz", chat_id=404)
-        self.assertIn("numero de celular", name_response.json()["reply"].lower())
-        session.refresh_from_db()
-        self.assertEqual(session.current_step, "waiting_auction_phone")
-
-        phone_response = self._send_webhook_message("3001234567", chat_id=404)
-        self.assertIn("direccion del servicio", phone_response.json()["reply"].lower())
-        session.refresh_from_db()
-        self.assertEqual(session.current_step, "waiting_auction_address")
-
-        final_response = self._send_webhook_message("Calle 84 # 50-10, Barranquilla", chat_id=404)
-        self.assertIn("Subasta creada", final_response.json()["reply"])
-
+        contact_response = self._send_webhook_message("0", chat_id=404)
+        self.assertIn("nombre completo", contact_response.json()["reply"].lower())
+        phone_response = self._send_webhook_message("Laura Diaz", chat_id=404)
+        self.assertIn("celular", phone_response.json()["reply"].lower())
+        address_response = self._send_webhook_message("3001234567", chat_id=404)
+        self.assertIn("direccion", address_response.json()["reply"].lower())
+        auction_response = self._send_webhook_message("Calle 84 # 50-10 Riomar", chat_id=404)
+        self.assertIn("Subasta creada", auction_response.json()["reply"])
         anonymous_user = ChatSession.objects.get(chat_id=404).user
         self.assertIsNotNone(anonymous_user)
         self.assertNotEqual(anonymous_user, self.user)

@@ -31,7 +31,47 @@ Current mobile UX support includes:
 ```txt
 frontend/   Next.js 15, TypeScript, Tailwind CSS, shadcn/ui
 backend/    Django, Django REST Framework, JWT auth, recommendation modules
+docs/       Project scope, architecture, API overview, testing guide
+scripts/    setup-dev, run-backend, run-frontend
 ```
+
+## Documentation
+
+- [Project scope](docs/project-scope.md) — MVP focus (conversational booking; auctions out of scope)
+- [Architecture](docs/architecture.md)
+- [API overview](docs/api-overview.md)
+- [Testing](docs/testing.md)
+
+## Technology Stack
+
+| Category | Technologies |
+| --- | --- |
+| **Frontend** | Next.js 15 (App Router), React 19, TypeScript, Tailwind CSS 4, shadcn/ui (`@base-ui/react`), Lucide icons |
+| **Backend framework** | Django |
+| **API layer** | Django REST Framework (ViewSets, routers, serializers) |
+| **Authentication** | `djangorestframework-simplejwt` (JWT access/refresh), custom `accounts.User` with role-based access |
+| **Database** | SQLite (default local), PostgreSQL via `psycopg2-binary` (optional `POSTGRES_*` env or Docker Compose) |
+| **ORM** | Django ORM |
+| **Testing** | Django `manage.py test` (backend), Playwright (frontend E2E), ESLint (`next lint`) |
+| **Architecture style** | Monorepo with modular Django apps, service-layer business logic, REST API + responsive Next.js dashboards |
+| **Conversational channel** | Telegram (`python-telegram-bot` webhook and chatbot flow) |
+| **LLM integration** | Google Gemini (`google-genai`) with deterministic rule-based fallback in `llm` |
+| **Notifications** | `notifications` app (in-app records; channels include dashboard, Telegram, email, WhatsApp enum) |
+| **WhatsApp integration** | Legacy identifiers and channel enums (`whatsapp_id`, lead `source=whatsapp`); no WhatsApp Business API client in the MVP—client intake is Telegram-first |
+| **Media** | Pillow (service photos and uploads) |
+| **Containerization** | Docker Compose (`postgres`, `backend`, `frontend`), per-service Dockerfiles |
+| **Deployment / infrastructure** | GitHub Actions workflow on `staging` (backend tests, frontend lint/build, Playwright E2E); `gunicorn` listed for production-style serving |
+| **Development tools** | `python-dotenv`, `python-decouple`, `django-cors-headers`, `requests`, project scripts under `scripts/` |
+
+### Backend Architecture Highlights
+
+- **Service-layer architecture** — domain rules live in `*/services.py` modules (appointments, reputation, disputes, audit, recommendations, LLM, notifications, auctions); views stay thin.
+- **DRF ViewSets** — catalog, appointments, leads, disputes, reputation, notifications, and audit exposed through registered routers in `config/urls.py`.
+- **JWT authentication** — global `JWTAuthentication` with token and refresh endpoints; role-aware permission classes in `accounts.permissions`.
+- **Audit logging** — `audit` app records operational events via `audit.services.log_audit_event`.
+- **Role-based permissions** — clients, technicians, administrators, and arbiters enforced in view/queryset layers and custom DRF permissions.
+- **Transactional business logic** — appointment and conversational flows use `transaction.atomic()` and `select_for_update` where scheduling conflicts matter.
+- **Appointment scheduling** — dedicated `appointments` models and services for slot calculation, booking, cancellation, rescheduling, and completion with lead and notification side effects.
 
 ## Backend modules
 
@@ -46,6 +86,26 @@ backend/    Django, Django REST Framework, JWT auth, recommendation modules
 - `leads`: conversational service requests assigned to technicians.
 - `appointments`: real scheduling, cancellation and rescheduling.
 - `adminpanel`: administrator summary metrics for dashboard monitoring.
+- `auctions`: secondary auction flow (Telegram and web); documented as outside core MVP in `docs/project-scope.md`.
+
+## Frontend routes
+
+| Route | Purpose | Auth |
+| --- | --- | --- |
+| `/` | Landing and login | Public |
+| `/login` | Same login experience as `/` | Public |
+| `/register` | Client or technician registration | Public |
+| `/dashboard` | Client dashboard (appointments, disputes, ratings) | JWT required (`RequireAuth`) |
+| `/technician` | Technician onboarding, services and leads | Session recommended |
+| `/admin` | Administrator metrics and moderation | Session recommended |
+| `/arbiter` | Dispute queue and decisions | Session recommended |
+
+After login or registration, the app redirects by role (`roleHome`):
+
+- `client` → `/dashboard`
+- `technician` → `/technician`
+- `admin` → `/admin`
+- `arbiter` → `/arbiter`
 
 ## Local development
 
@@ -118,10 +178,6 @@ cd backend
 This creates the initial service categories and Barranquilla/Soledad coverage zones used by onboarding, recommendations and conversational matching.
 
 
-## Demo guide
-
-Visit `http://localhost:3000/demo` for an in-app presentation guide with demo users and route order.
-
 ## Demo data
 
 Run this after migrations to create demo users, verified technicians, services, leads, ratings and a dispute:
@@ -139,30 +195,35 @@ Subastech123!
 
 Demo users:
 
-- `demo_admin` -> administrator dashboard `/admin`
-- `demo_arbiter` -> arbiter dashboard `/arbiter`
-- `demo_client` -> client identity for ratings/disputes
-- `tech_carlos` -> technician dashboard `/technician`
-- `tech_laura` -> technician dashboard `/technician`
-- `tech_miguel` -> technician dashboard `/technician`
+| User | Role | Dashboard |
+| --- | --- | --- |
+| `demo_admin` | Administrator | `/admin` |
+| `demo_arbiter` | Arbiter | `/arbiter` |
+| `demo_client` | Client | Use with chatbot/ratings flows |
+| `tech_carlos` | Technician | `/technician` |
+| `tech_laura` | Technician | `/technician` |
+| `tech_miguel` | Technician | `/technician` |
 
-Suggested demo flow:
+## Demo guide (10-minute presentation)
 
-1. Login as `demo_admin` and review metrics, categories, zones and technician moderation.
-2. Login as `tech_carlos` and review services/leads.
-3. Use `/api/chatbot/message/` to simulate a Telegram conversation and create a booking.
-4. Login as `demo_arbiter` and review the open dispute.
+1. Open `http://localhost:3000/login` (or `/`).
+2. **Register a client** at `http://localhost:3000/register` — choose **Cliente**, fill email and password; you are redirected to `/dashboard`.
+3. **Staff dashboards:** log in as `demo_admin` → `/admin`; `tech_carlos` → `/technician`; `demo_arbiter` → `/arbiter`.
+4. **Conversational booking:** with a JWT from a client user, call `POST /api/chatbot/message/` (see [Telegram bot flow](#telegram-bot-flow)) to simulate intake, recommendations and slot booking.
+5. **Dispute moderation:** as `demo_arbiter`, claim and resolve the seeded open dispute.
+
+For a full test checklist and E2E commands, see [docs/testing.md](docs/testing.md).
 
 ## Frontend authentication
 
-Visit `http://localhost:3000/login` to authenticate with the Django JWT backend. After login, the frontend stores the session locally and redirects by role:
+Authentication uses the Django JWT API (`POST /api/auth/token/`). The frontend stores `access` and `refresh` tokens in `localStorage` (`subastech.auth`) and hydrates the user via `GET /api/auth/me/`.
 
-- `technician` -> `/technician`
-- `admin` -> `/admin`
-- `arbiter` -> `/arbiter`
-- `client` -> `/`
+- **Login:** `http://localhost:3000/login` or `/` — email or username + password.
+- **Register:** `http://localhost:3000/register` — role **Cliente** (email required) or **Técnico** (phone, address, trade). Successful registration logs you in and redirects to `roleHome`.
+- **Protected route:** `/dashboard` requires a stored session (`RequireAuth`); unauthenticated users are sent to `/login`.
+- **Other dashboards** (`/admin`, `/technician`, `/arbiter`) load data when a session exists; some views still support pasting a JWT access token for local debugging.
 
-Dashboards still allow manual tokens for testing, but they now automatically reuse the saved session.
+Link Telegram after web login when the URL includes `?telegram_chat_id=<id>` (handled on the login form).
 
 ## First API endpoints
 
@@ -206,7 +267,7 @@ Example recommendation request:
 
 ## Arbiter dashboard
 
-Visit `http://localhost:3000/arbiter` to test human-in-the-loop dispute moderation. Paste a JWT access token for a user with `role=arbiter`, `role=admin`, or Django staff permissions.
+Visit `http://localhost:3000/arbiter` to test human-in-the-loop dispute moderation. Sign in as `demo_arbiter` (after `seed_demo_data`) or paste a JWT access token for a user with `role=arbiter`, `role=admin`, or Django staff permissions.
 
 The arbiter flow is intentionally not autonomous:
 
@@ -221,7 +282,7 @@ The arbiter flow is intentionally not autonomous:
 
 ## Admin dashboard
 
-Visit `http://localhost:3000/admin` to load the administrator dashboard. Paste a JWT access token for either:
+Visit `http://localhost:3000/admin` to load the administrator dashboard. Sign in as `demo_admin` or paste a JWT access token for either:
 
 - a Django staff/superuser, or
 - a SubasTech user with `role=admin`.
@@ -284,8 +345,20 @@ The response includes the extracted intent, ranked recommendations or slot optio
 ## MVP build order
 
 1. Run `seed_initial_data` to create categories and zones.
-2. Use `/technician` to complete technician onboarding and manage services with JWT auth.
-3. Configure Telegram bot credentials and expose `/api/telegram/webhook/` publicly.
-4. Validate end-to-end conversational booking, cancel and reschedule flows against a real Telegram bot.
-5. Add administrator and arbiter dashboard pages.
-6. Expand dispute moderation and reputation effects.
+2. Run `seed_demo_data` for presentation users and sample disputes.
+3. Use `/technician` to complete technician onboarding and manage services with JWT auth.
+4. Configure Telegram bot credentials and expose `/api/telegram/webhook/` publicly.
+5. Validate end-to-end conversational booking, cancel and reschedule flows (API chatbot or real Telegram bot).
+6. Harden frontend role guards on all dashboards and tighten public API permissions.
+7. Expand dispute moderation, reputation effects and delivery artifacts (documento final, video demo, evidencia Jira).
+
+## Team (Entrega Final)
+
+| Member | Role |
+| --- | --- |
+| Jean Pierre | Product Owner |
+| Daniel Mendez | Scrum Master |
+| Juan Diego | Developer |
+| Juan Camilo | Developer |
+
+Task assignments for the MVP backlog are tracked in the team Jira board.

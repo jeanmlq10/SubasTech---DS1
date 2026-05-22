@@ -33,6 +33,7 @@ from accounts.permissions import IsPlatformAdmin
 from catalog.models import TechnicianProfile
 from notifications.services import build_telegram_message_payload
 from telegram_bot.client import TelegramBotClient
+from telegram_bot.models import ChatSession
 
 logger = logging.getLogger(__name__)
 
@@ -239,11 +240,27 @@ class AppointmentViewSet(viewsets.ModelViewSet):
             actor=request.user,
         )
         technician_name = updated.technician.user.get_full_name() or updated.technician.user.username
-        survey_url = f"{settings.FRONTEND_URL}/dashboard?rate={updated.id}"
+        # Ask for rating directly in Telegram: user should reply with a number 0-5
         _send_client_telegram(
             updated,
-            f"Servicio completado por {technician_name}.\n\nCalifica tu experiencia aqui:\n{survey_url}",
+            (
+                f"Servicio completado por {technician_name}.\n\n"
+                "Por favor, responde en este chat con un numero entre 0 y 5 seguido de un comentario opcional, por ejemplo:\n"
+                "4 Muy buen servicio."
+            ),
         )
+        # If client has a telegram session, put it into a waiting_rating state so
+        # the webhook will interpret the next numeric reply as the rating for this
+        # appointment.
+        chat_id = getattr(updated.client, "telegram_chat_id", None)
+        if chat_id:
+            try:
+                session, _ = ChatSession.objects.get_or_create(chat_id=int(chat_id))
+                session.current_step = "waiting_rating"
+                session.state_data = {"awaiting_rating_for": updated.id}
+                session.save(update_fields=["current_step", "state_data", "updated_at"])
+            except Exception:
+                logger.exception("Failed to set chat session waiting_rating for appointment %s", updated.id)
         return self._render(updated)
 
     @action(detail=True, methods=["post"])
