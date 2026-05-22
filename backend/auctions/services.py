@@ -8,6 +8,7 @@ from appointments.services import create_appointment
 from audit.models import AuditEvent
 from audit.services import log_audit_event
 from leads.models import ServiceLead
+from payments.services import create_escrow_for_awarded_bid
 
 from .models import Auction, Bid
 
@@ -68,6 +69,8 @@ def award_auction_bid(*, auction: Auction, bid: Bid, actor, source: str = "aucti
             )
             lead.metadata = {**lead.metadata, "appointment_id": appointment.id}
             lead.save(update_fields=["metadata", "updated_at"])
+
+        create_escrow_for_awarded_bid(auction=auction, bid=bid, appointment=appointment)
 
     log_audit_event(
         event_type=AuditEvent.EventType.LEAD_STATUS_CHANGED,

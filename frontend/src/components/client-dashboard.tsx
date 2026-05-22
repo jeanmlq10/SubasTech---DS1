@@ -1,10 +1,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { FormEvent, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Calendar, ClipboardList, LayoutDashboard, LogOut, MessageCircle, Settings, User } from "lucide-react";
 
-import { API_URL, Appointment, Auction, Category, Dispute, Rating, Zone } from "@/lib/api";
+import { API_URL, Appointment, Auction, Category, Dispute, EscrowPayment, Rating, Zone } from "@/lib/api";
 import { clearStoredAuth, restoreSession, roleHome } from "@/lib/auth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -47,6 +47,7 @@ export function ClientDashboard() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [disputes, setDisputes] = useState<Dispute[]>([]);
   const [ratings, setRatings] = useState<Rating[]>([]);
+  const [payments, setPayments] = useState<EscrowPayment[]>([]);
   const [message, setMessage] = useState("Cargando dashboard...");
   const [isBooting, setIsBooting] = useState(true);
   const [auctionForm, setAuctionForm] = useState({
@@ -107,15 +108,16 @@ export function ClientDashboard() {
 
   async function loadClientData(accessToken: string) {
     try {
-      const [categoryResponse, zoneResponse, auctionResponse, appointmentResponse, disputeResponse, ratingResponse] = await Promise.all([
+      const [categoryResponse, zoneResponse, auctionResponse, appointmentResponse, disputeResponse, ratingResponse, paymentResponse] = await Promise.all([
         fetch(`${API_URL}/categories/`),
         fetch(`${API_URL}/zones/`),
         fetch(`${API_URL}/auctions/`, { headers: { Authorization: `Bearer ${accessToken}` } }),
         fetch(`${API_URL}/appointments/`, { headers: { Authorization: `Bearer ${accessToken}` } }),
         fetch(`${API_URL}/disputes/`, { headers: { Authorization: `Bearer ${accessToken}` } }),
         fetch(`${API_URL}/ratings/`, { headers: { Authorization: `Bearer ${accessToken}` } }),
+        fetch(`${API_URL}/payments/`, { headers: { Authorization: `Bearer ${accessToken}` } }),
       ]);
-      if (!categoryResponse.ok || !zoneResponse.ok || !auctionResponse.ok || !appointmentResponse.ok || !disputeResponse.ok || !ratingResponse.ok) {
+      if (!categoryResponse.ok || !zoneResponse.ok || !auctionResponse.ok || !appointmentResponse.ok || !disputeResponse.ok || !ratingResponse.ok || !paymentResponse.ok) {
         throw new Error("Client data request failed");
       }
       setCategories((await categoryResponse.json()) as Category[]);
@@ -124,13 +126,14 @@ export function ClientDashboard() {
       setAppointments((await appointmentResponse.json()) as Appointment[]);
       setDisputes((await disputeResponse.json()) as Dispute[]);
       setRatings((await ratingResponse.json()) as Rating[]);
+      setPayments((await paymentResponse.json()) as EscrowPayment[]);
       setMessage("Dashboard actualizado.");
     } catch {
       setMessage("No se pudo cargar la informacion de subastas.");
     }
   }
 
-  async function createAuction(event: FormEvent<HTMLFormElement>) {
+  async function createAuction(event: { preventDefault(): void }) {
     event.preventDefault();
     if (!token) {
       setMessage("Inicia sesion antes de crear subastas.");
@@ -221,6 +224,38 @@ export function ClientDashboard() {
       setMessage("Cita cancelada.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "No se pudo cancelar la cita.");
+    }
+  }
+
+  async function payDeposit(paymentId: number) {
+    if (!window.confirm("¿Confirmas el pago de la reserva (10%)? (modo demo)")) return;
+    try {
+      const response = await fetch(`${API_URL}/payments/${paymentId}/pay-deposit/`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!response.ok) throw new Error("No se pudo procesar el pago de reserva.");
+      await loadClientData(token);
+      setMessage("Reserva del 10% pagada.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo pagar la reserva.");
+    }
+  }
+
+  async function payRemaining(paymentId: number) {
+    if (!window.confirm("¿Confirmas el pago del saldo restante (90%)? (modo demo)")) return;
+    try {
+      const response = await fetch(`${API_URL}/payments/${paymentId}/pay-remaining/`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!response.ok) throw new Error("No se pudo procesar el pago del saldo.");
+      await loadClientData(token);
+      setMessage("Saldo restante del 90% pagado.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo pagar el saldo.");
     }
   }
 
@@ -704,6 +739,77 @@ export function ClientDashboard() {
                       </Button>
                     </div>
                   ))
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className={`${surfaceClass} border-white/10 bg-white/5 text-white`}>
+            <CardHeader>
+              <CardTitle className="text-white">Mis pagos</CardTitle>
+              <CardDescription className="text-purple-200">Reserva 10% al aceptar una oferta — saldo 90% al completar el servicio.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Separator className="mb-4 bg-white/10" />
+              <div className="grid gap-3">
+                {payments.length === 0 ? (
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-purple-200">Aun no tienes pagos registrados.</div>
+                ) : (
+                  payments.map((payment) => {
+                    const canPayDeposit = payment.status === "pending_deposit";
+                    const canPayRemaining = payment.status === "service_completed" || payment.status === "pending_remaining";
+                    const total = Number(payment.total_amount).toLocaleString("es-CO");
+                    const deposit = Number(payment.deposit_amount).toLocaleString("es-CO");
+                    const remaining = Number(payment.remaining_amount).toLocaleString("es-CO");
+                    return (
+                      <div key={payment.id} className="rounded-2xl border border-white/10 bg-white/[0.07] p-4">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <p className="text-xs uppercase tracking-[0.24em] text-orange-200">Pago #{payment.id}</p>
+                            <p className="mt-1 text-sm text-white">Técnico: {payment.technician_name}</p>
+                            <p className="mt-1 text-sm text-purple-200">Total: ${total} COP</p>
+                            <div className="mt-2 grid grid-cols-2 gap-x-6 text-sm">
+                              <span className="text-purple-300">Reserva 10%</span>
+                              <span className="font-semibold text-white">${deposit}</span>
+                              <span className="text-purple-300">Saldo 90%</span>
+                              <span className="font-semibold text-white">${remaining}</span>
+                            </div>
+                          </div>
+                          <Badge className="border-white/10 bg-white/10 text-purple-100 hover:bg-white/10 shrink-0">
+                            {payment.status_display}
+                          </Badge>
+                        </div>
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          <Button
+                            size="sm"
+                            className="bg-gradient-to-r from-orange-400 to-rose-500 font-semibold text-white hover:from-orange-500 hover:to-rose-600"
+                            disabled={!canPayDeposit}
+                            onClick={() => void payDeposit(payment.id)}
+                          >
+                            Pagar reserva (10%)
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="border border-white/10 text-purple-100 hover:bg-white/10 hover:text-white"
+                            disabled={!canPayRemaining}
+                            onClick={() => void payRemaining(payment.id)}
+                          >
+                            Pagar saldo (90%)
+                          </Button>
+                        </div>
+                        {payment.status === "disputed" && (
+                          <p className="mt-3 text-sm text-rose-300">Pago bloqueado por disputa activa. Se liberará o reembolsará cuando el árbitro resuelva.</p>
+                        )}
+                        {payment.status === "released" && (
+                          <p className="mt-3 text-sm text-emerald-300">Pago liberado al técnico.</p>
+                        )}
+                        {payment.status === "refunded" && (
+                          <p className="mt-3 text-sm text-emerald-300">Pago reembolsado.</p>
+                        )}
+                      </div>
+                    );
+                  })
                 )}
               </div>
             </CardContent>

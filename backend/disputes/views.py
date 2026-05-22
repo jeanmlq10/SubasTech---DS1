@@ -10,6 +10,8 @@ from accounts.models import User
 from accounts.permissions import IsPlatformArbiter
 from audit.models import AuditEvent
 from audit.services import log_audit_event
+from payments.models import EscrowPayment
+from payments.services import hold_for_dispute, refund_payment, release_payment
 from reputation.services import evaluate_automatic_penalties
 from .models import Dispute
 from .serializers import ArbiterDecisionSerializer, ArbiterDisputeSerializer, DisputeEvidenceSerializer, DisputeSerializer
@@ -17,6 +19,31 @@ from .services import summarize_dispute
 
 
 DISPUTE_STRIKE_THRESHOLD = 3
+
+
+def _hold_payment_for_dispute(dispute: "Dispute") -> None:
+    payment = EscrowPayment.objects.filter(
+        client=dispute.client,
+        technician=dispute.technician,
+    ).exclude(
+        status__in=[EscrowPayment.Status.RELEASED, EscrowPayment.Status.REFUNDED, EscrowPayment.Status.CANCELLED]
+    ).order_by("-created_at").first()
+    if payment:
+        hold_for_dispute(payment, dispute)
+
+
+def _settle_payment_for_dispute(dispute: "Dispute", actor) -> None:
+    payment = EscrowPayment.objects.filter(
+        client=dispute.client,
+        technician=dispute.technician,
+        status=EscrowPayment.Status.DISPUTED,
+    ).order_by("-created_at").first()
+    if payment is None:
+        return
+    if dispute.decision == Dispute.Decision.FAVOR_TECHNICIAN:
+        release_payment(payment, actor=actor)
+    elif dispute.decision in {Dispute.Decision.FAVOR_CLIENT, Dispute.Decision.PARTIAL}:
+        refund_payment(payment, actor=actor, reason=f"dispute:{dispute.decision}")
 
 
 def _apply_client_dispute_strike(dispute: "Dispute") -> None:
@@ -49,6 +76,7 @@ class DisputeViewSet(viewsets.ModelViewSet):
             raise PermissionDenied("Only client users can open disputes.")
         description = serializer.validated_data.get("description", "")
         dispute = serializer.save(client=self.request.user, ai_summary=summarize_dispute(description))
+        _hold_payment_for_dispute(dispute)
         log_audit_event(
             event_type=AuditEvent.EventType.DISPUTE_CREATED,
             actor=self.request.user,
@@ -137,6 +165,7 @@ class ArbiterDecisionAPIView(APIView):
         )
         evaluate_automatic_penalties(dispute.technician)
         _apply_client_dispute_strike(dispute)
+        _settle_payment_for_dispute(dispute, actor=request.user)
         log_audit_event(
             event_type=AuditEvent.EventType.DISPUTE_RESOLVED,
             actor=request.user,

@@ -1,4 +1,5 @@
 from datetime import datetime, time, timedelta
+from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -13,6 +14,7 @@ from catalog.models import (
     TechnicianProfile,
     Zone,
 )
+from payments.models import EscrowPayment
 
 from .models import Appointment
 
@@ -206,13 +208,24 @@ class AppointmentWorkflowTests(TestCase):
             start_hour=9,
             end_hour=10,
         )
+        payment = EscrowPayment.objects.create(
+            appointment=appointment,
+            client=self.client_user,
+            technician=self.profile,
+            total_amount=Decimal("100000"),
+            deposit_amount=Decimal("10000"),
+            remaining_amount=Decimal("90000"),
+            status=EscrowPayment.Status.DEPOSIT_PAID,
+        )
         self.client.force_authenticate(self.client_user)
 
         response = self.client.post(f"/api/appointments/{appointment.id}/confirm_complete/", {}, format="json")
 
         self.assertEqual(response.status_code, 200)
         appointment.refresh_from_db()
+        payment.refresh_from_db()
         self.assertEqual(appointment.status, Appointment.Status.COMPLETED)
+        self.assertEqual(payment.status, EscrowPayment.Status.SERVICE_COMPLETED)
 
     def test_other_client_cannot_confirm_appointment_complete(self):
         appointment = self._create_appointment(

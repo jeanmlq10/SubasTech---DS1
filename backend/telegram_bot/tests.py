@@ -277,7 +277,13 @@ class TelegramBotTests(TestCase):
     def test_link_user_claims_anonymous_telegram_auction(self):
         first_response = self._send_webhook_message("Necesito un electricista en Riomar", chat_id=404)
         self.assertIn("Tecnicos disponibles", first_response.json()["reply"])
-        auction_response = self._send_webhook_message("0", chat_id=404)
+        contact_response = self._send_webhook_message("0", chat_id=404)
+        self.assertIn("nombre completo", contact_response.json()["reply"].lower())
+        phone_response = self._send_webhook_message("Laura Diaz", chat_id=404)
+        self.assertIn("celular", phone_response.json()["reply"].lower())
+        address_response = self._send_webhook_message("3001234567", chat_id=404)
+        self.assertIn("direccion", address_response.json()["reply"].lower())
+        auction_response = self._send_webhook_message("Calle 84 # 50-10 Riomar", chat_id=404)
         self.assertIn("Subasta creada", auction_response.json()["reply"])
         anonymous_user = ChatSession.objects.get(chat_id=404).user
         self.assertIsNotNone(anonymous_user)
