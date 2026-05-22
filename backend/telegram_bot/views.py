@@ -36,9 +36,6 @@ from notifications.models import Notification
 from notifications.services import build_telegram_message_payload, create_notification
 from recommendations.services import RecommendationRequest, recommend_services
 
-from payments.models import EscrowPayment
-from payments.services import create_escrow_for_awarded_bid, mark_deposit_paid, mark_remaining_paid
-
 from .ai import extract_intent
 from .client import TelegramBotClient
 from .models import ChatSession, ConversationMessage
@@ -409,9 +406,6 @@ def handle_conversation(session: ChatSession, text: str, intent: dict) -> str:
     if _is_bid_acceptance(cleaned_text):
         return _handle_bid_acceptance(session, cleaned_text)
 
-    if _is_payment_command(cleaned_text):
-        return _handle_payment_command(session, cleaned_text)
-
     if accion == "saludo" or lowered in {"/start", "hola", "buenas", "buenos dias"}:
         _reset_session(session)
         return _build_welcome_message()
@@ -456,10 +450,7 @@ def handle_conversation(session: ChatSession, text: str, intent: dict) -> str:
         "- Necesito un electricista en Riomar\n"
         "- Quiero cancelar mi cita\n"
         "- Cancelar mi subasta\n"
-        "- Reagendar mi cita\n"
-        "- PAGAR RESERVA\n"
-        "- PAGAR RESTANTE\n"
-        "- ESTADO PAGO"
+        "- Reagendar mi cita"
     )
 
 
@@ -809,19 +800,6 @@ def _handle_bid_acceptance(session: ChatSession, text: str) -> str:
         return "No pude aceptar esa oferta porque el horario ya no esta disponible. Espera otra oferta o crea una nueva subasta."
 
     _reset_session(session)
-
-    payment = EscrowPayment.objects.filter(appointment=appointment).first()
-    payment_summary = ""
-    if payment:
-        payment_summary = (
-            f"\n\n--- Pago de reserva requerido ---\n"
-            f"Valor total: ${int(payment.total_amount):,}".replace(",", ".")
-            + f"\nReserva 10%: ${int(payment.deposit_amount):,}".replace(",", ".")
-            + f"\nSaldo restante 90%: ${int(payment.remaining_amount):,}".replace(",", ".")
-            + f"\nEstado: pendiente de pago inicial\n\n"
-            "Para simular el pago de reserva responde:\nPAGAR RESERVA"
-        )
-
     return (
         "Oferta aceptada y cita creada.\n\n"
         f"Tecnico: {_bid_technician_name(bid)}\n"
@@ -829,7 +807,6 @@ def _handle_bid_acceptance(session: ChatSession, text: str) -> str:
         f"Horario: {_format_local_datetime(appointment.scheduled_start)} - {_format_local_time(appointment.scheduled_end)}\n"
         f"Direccion/zona: {auction.location or (auction.zone.name if auction.zone else 'Sin zona')}\n"
         f"Numero de cita: {appointment.id}"
-        + payment_summary
     )
 
 
@@ -842,95 +819,6 @@ def _technician_name_matches(bid: Bid, raw_name: str) -> bool:
 
 def _bid_technician_name(bid: Bid) -> str:
     return bid.technician.user.get_full_name() or bid.technician.user.username
-
-
-# ---------------------------------------------------------------------------
-# Payment commands
-# ---------------------------------------------------------------------------
-
-_PAYMENT_COMMAND_PAGAR_RESERVA = "pagar reserva"
-_PAYMENT_COMMAND_PAGAR_RESTANTE = "pagar restante"
-_PAYMENT_COMMAND_ESTADO_PAGO = "estado pago"
-
-
-def _is_payment_command(text: str) -> bool:
-    lowered = (text or "").strip().lower()
-    return lowered in {_PAYMENT_COMMAND_PAGAR_RESERVA, _PAYMENT_COMMAND_PAGAR_RESTANTE, _PAYMENT_COMMAND_ESTADO_PAGO}
-
-
-def _get_active_payment_for_session(session: ChatSession) -> "EscrowPayment | None":
-    if not session.user_id:
-        return None
-    return (
-        EscrowPayment.objects.filter(client_id=session.user_id)
-        .exclude(status__in=[EscrowPayment.Status.RELEASED, EscrowPayment.Status.REFUNDED, EscrowPayment.Status.CANCELLED])
-        .order_by("-created_at")
-        .first()
-    )
-
-
-def _payment_status_display(payment: "EscrowPayment") -> str:
-    labels = {
-        EscrowPayment.Status.PENDING_DEPOSIT: "Pendiente de reserva (10%)",
-        EscrowPayment.Status.DEPOSIT_PAID: "Reserva pagada — pendiente de completar servicio",
-        EscrowPayment.Status.SERVICE_COMPLETED: "Servicio completado — listo para pagar saldo",
-        EscrowPayment.Status.PENDING_REMAINING: "Pendiente de saldo restante (90%)",
-        EscrowPayment.Status.REMAINING_PAID: "Saldo pagado — por liberar al tecnico",
-        EscrowPayment.Status.RELEASED: "Pago liberado al tecnico",
-        EscrowPayment.Status.REFUNDED: "Pago reembolsado al cliente",
-        EscrowPayment.Status.DISPUTED: "Pago bloqueado por disputa activa",
-        EscrowPayment.Status.CANCELLED: "Pago cancelado",
-    }
-    return labels.get(payment.status, payment.status)
-
-
-def _handle_payment_command(session: ChatSession, text: str) -> str:
-    command = (text or "").strip().lower()
-    payment = _get_active_payment_for_session(session)
-
-    if payment is None:
-        return "No encontre un pago activo en tu cuenta. Primero acepta una oferta de tecnico."
-
-    if command == _PAYMENT_COMMAND_ESTADO_PAGO:
-        return (
-            f"Estado de tu pago #{payment.id}\n\n"
-            f"Valor total: ${int(payment.total_amount):,}".replace(",", ".")
-            + f"\nReserva 10%: ${int(payment.deposit_amount):,}".replace(",", ".")
-            + f"\nSaldo restante 90%: ${int(payment.remaining_amount):,}".replace(",", ".")
-            + f"\nEstado: {_payment_status_display(payment)}"
-        )
-
-    if command == _PAYMENT_COMMAND_PAGAR_RESERVA:
-        if payment.status != EscrowPayment.Status.PENDING_DEPOSIT:
-            return f"La reserva no esta pendiente. Estado actual: {_payment_status_display(payment)}"
-        try:
-            mark_deposit_paid(payment, actor=session.user)
-        except Exception as exc:
-            logger.warning("Telegram pay deposit failed: %s", exc)
-            return "No pude procesar el pago de reserva. Intentalo de nuevo."
-        return (
-            f"Reserva del 10% pagada.\n\n"
-            f"Monto pagado: ${int(payment.deposit_amount):,}".replace(",", ".")
-            + f"\nSaldo restante: ${int(payment.remaining_amount):,}".replace(",", ".")
-            + "\n\nEl tecnico ha sido notificado. Cuando el servicio termine podras pagar el saldo con:\nPAGAR RESTANTE"
-        )
-
-    if command == _PAYMENT_COMMAND_PAGAR_RESTANTE:
-        if payment.status not in {EscrowPayment.Status.SERVICE_COMPLETED, EscrowPayment.Status.PENDING_REMAINING}:
-            return f"El saldo restante aun no esta disponible para pago. Estado actual: {_payment_status_display(payment)}"
-        try:
-            mark_remaining_paid(payment, actor=session.user)
-        except Exception as exc:
-            logger.warning("Telegram pay remaining failed: %s", exc)
-            return "No pude procesar el pago del saldo. Intentalo de nuevo."
-        return (
-            f"Saldo restante del 90% pagado.\n\n"
-            f"Monto pagado: ${int(payment.remaining_amount):,}".replace(",", ".")
-            + f"\nTotal pagado: ${int(payment.total_amount):,}".replace(",", ".")
-            + "\n\nGracias! El pago sera liberado al tecnico.\nSi tienes algun inconveniente, puedes abrir una disputa desde el panel web."
-        )
-
-    return "Comando de pago no reconocido."
 
 
 def _meaningful_request_text(text: str, category: str | None, zone: str | None) -> str:

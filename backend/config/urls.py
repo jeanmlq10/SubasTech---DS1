@@ -21,7 +21,6 @@ from catalog.views import (
     ZoneViewSet,
 )
 from disputes.views import ArbiterClaimAPIView, ArbiterDecisionAPIView, ArbiterQueueAPIView, DisputeViewSet
-from payments.views import EscrowPaymentViewSet
 from leads.views import TechnicianLeadViewSet
 from llm.views import InterpretMessageAPIView
 from notifications.views import NotificationViewSet
@@ -46,7 +45,6 @@ router.register("penalties", PenaltyViewSet)
 router.register("disputes", DisputeViewSet)
 router.register("notifications", NotificationViewSet, basename="notifications")
 router.register("appointments", AppointmentViewSet, basename="appointment")
-router.register("payments", EscrowPaymentViewSet, basename="payments")
 
 urlpatterns = [
     path("admin/", admin.site.urls),

@@ -42,7 +42,6 @@ INSTALLED_APPS = [
     "telegram_bot",
     "notifications",
     "appointments",
-    "payments",
 ]
 
 MIDDLEWARE = [
