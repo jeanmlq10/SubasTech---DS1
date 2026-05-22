@@ -52,7 +52,7 @@ scripts/    setup-dev, run-backend, run-frontend
 | **Authentication** | `djangorestframework-simplejwt` (JWT access/refresh), custom `accounts.User` with role-based access |
 | **Database** | SQLite (default local), PostgreSQL via `psycopg2-binary` (optional `POSTGRES_*` env or Docker Compose) |
 | **ORM** | Django ORM |
-| **Testing** | Django `manage.py test` (backend), Playwright (frontend E2E), ESLint (`next lint`) |
+| **Testing** | Django `manage.py test` (backend), Playwright E2E (`frontend/e2e`), ESLint (`npm run lint`) |
 | **Architecture style** | Monorepo with modular Django apps, service-layer business logic, REST API + responsive Next.js dashboards |
 | **Conversational channel** | Telegram (`python-telegram-bot` webhook and chatbot flow) |
 | **LLM integration** | Google Gemini (`google-genai`) with deterministic rule-based fallback in `llm` |
@@ -72,6 +72,7 @@ scripts/    setup-dev, run-backend, run-frontend
 - **Role-based permissions** — clients, technicians, administrators, and arbiters enforced in view/queryset layers and custom DRF permissions.
 - **Transactional business logic** — appointment and conversational flows use `transaction.atomic()` and `select_for_update` where scheduling conflicts matter.
 - **Appointment scheduling** — dedicated `appointments` models and services for slot calculation, booking, cancellation, rescheduling, and completion with lead and notification side effects.
+- **Modular monolith (backend)** — one Django deployable with domain apps; modules communicate via Python service imports and shared ORM models, not internal HTTP or message queues.
 
 ## Backend modules
 
@@ -341,6 +342,56 @@ curl -X POST http://localhost:8000/api/chatbot/message/ -H "Authorization: Beare
 ```
 
 The response includes the extracted intent, ranked recommendations or slot options, and the chatbot reply text.
+
+## Testing and CI
+
+SubasTech uses a layered test setup documented in [docs/testing.md](docs/testing.md). GitHub Actions runs on pull requests and pushes to the `staging` branch (`.github/workflows/staging-tests.yml`).
+
+### CI jobs
+
+| Job | Command | What it validates |
+| --- | --- | --- |
+| **backend** | `python manage.py test` | Django tests across all apps (SQLite on the runner when `POSTGRES_DB` is unset) |
+| **frontend** | `npm run lint` then `npm run build` | ESLint (Next.js rules) and production compile |
+| **e2e** | `npm run e2e` (after backend + frontend jobs) | Playwright Chromium against live backend and Next dev server |
+
+The **e2e** job installs Playwright with system deps, runs `scripts/run-e2e-backend.sh` (migrate + `seed_demo_data` + `runserver`), and starts Next with `NEXT_PUBLIC_API_URL` pointing at the API.
+
+### Run tests locally
+
+```bash
+# Backend (requires scripts/setup-dev.sh first)
+scripts/run-backend-tests.sh
+
+# Frontend static checks
+cd frontend && npm install && npm run lint && npm run build
+
+# End-to-end (Playwright starts both servers automatically)
+cd frontend && npm run e2e
+```
+
+Optional: `cd frontend && npm run e2e:ui` for the Playwright UI runner.
+
+### Backend coverage (by app)
+
+| App | Typical coverage |
+| --- | --- |
+| `accounts` | Public registration, JWT login, `/api/auth/me/` |
+| `catalog` | Technician onboarding, services, documents, seeds |
+| `recommendations` | Deterministic ranking and filters |
+| `appointments` | Booking, cancel, reschedule, conflicts, audit side effects |
+| `telegram_bot` | Chatbot API, webhook, conversational booking (Gemini disabled in tests) |
+| `llm` | Rule-based intent and fallback |
+| `disputes` / `reputation` | Arbiter workflow, ratings, penalties |
+| `adminpanel` | Admin summary, verify/suspend, health endpoint |
+| `notifications` / `audit` / `leads` / `auctions` | Templates, events, leads, secondary auction flow |
+
+### Playwright E2E (`frontend/e2e`)
+
+- **smoke.spec.ts** — `GET /api/health/`, public `/`, `/login`, `/register`
+- **login.spec.ts** — demo user login redirects (`demo_admin`, `tech_carlos`, `demo_arbiter`) and invalid credentials
+
+E2E relies on demo users from `seed_demo_data` (password `Subastech123!`). Config: `frontend/playwright.config.ts` (30s test timeout, 2 retries in CI, single worker in CI).
 
 ## MVP build order
 

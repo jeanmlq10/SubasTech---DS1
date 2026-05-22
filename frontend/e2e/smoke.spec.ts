@@ -8,10 +8,12 @@ test("public pages and API health are available", async ({ page, request }) => {
   await expect(await health.json()).toEqual(expect.objectContaining({ status: "ok" }));
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: /encuentra tecnicos confiables/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^login$/i })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /bienvenido a subastech/i })).toBeVisible();
 
   await page.goto("/login");
-  await expect(page.getByText("Iniciar sesion")).toBeVisible();
+  await expect(page.getByLabel("Correo o usuario")).toBeVisible();
+  await expect(page.getByRole("button", { name: /entrar/i })).toBeVisible();
 
   await page.goto("/register");
   await expect(page.getByRole("heading", { name: /regístrate/i })).toBeVisible();

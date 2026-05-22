@@ -1,21 +1,22 @@
 # Testing strategy
 
-This repo uses a layered testing setup for the `staging` branch and a split GitHub Actions pipeline.
+This repo uses a layered testing setup for the `staging` branch. See also the [Testing and CI](../README.md#testing-and-ci) section in the root README.
 
 ## Backend
 
-Run the full Django test suite:
+Run Django checks and tests:
 
 ```bash
 scripts/run-backend-tests.sh
 ```
 
-Run one app in isolation:
+Or from `backend/` with the project virtualenv:
 
 ```bash
-cd backend
-USE_SQLITE_FOR_TESTS=true python manage.py test accounts
+.venv/bin/python manage.py test
 ```
+
+On CI (GitHub Actions), tests run with `pip install -r requirements.txt` and system Python 3.12, using SQLite when `POSTGRES_DB` is not set.
 
 Coverage priorities:
 
@@ -24,7 +25,8 @@ Coverage priorities:
 - technician onboarding, services and leads
 - admin moderation and metrics
 - arbiter dispute claim and decision flows
-- notification ownership and visibility
+- telegram chatbot booking, cancel and reschedule
+- notification ownership and audit events
 
 ## Frontend
 
@@ -41,6 +43,8 @@ npm run lint
 npm run build
 ```
 
+`lint` runs ESLint with Next.js core-web-vitals and TypeScript rules (`eslint.config.mjs`).
+
 ## End-to-end
 
 Playwright lives in `frontend/e2e`.
@@ -50,36 +54,32 @@ cd frontend
 npm run e2e
 ```
 
-The Playwright config starts both services:
+The Playwright config (`playwright.config.ts`) starts both services:
 
-- Django backend on `127.0.0.1:8000`
-- Next frontend on `127.0.0.1:3000`
-
-The backend server script runs migrations and loads demo data before serving.
+- Django backend on `127.0.0.1:8000` via `scripts/run-e2e-backend.sh` (migrate, `seed_demo_data`, `runserver`)
+- Next.js dev server on `127.0.0.1:3000` with `NEXT_PUBLIC_API_URL=http://127.0.0.1:8000/api`
 
 Current e2e coverage:
 
-- public smoke test for `/`, `/login`, `/demo` and `/api/health/`
-- login redirect tests for admin, technician and arbiter demo users
+- public smoke test for `/`, `/login`, `/register` and `GET /api/health/`
+- login redirect tests for `demo_admin`, `tech_carlos` and `demo_arbiter` (password `Subastech123!`)
 - invalid login error handling
+
+In CI: 2 retries, 1 worker, Chromium only.
 
 ## CI
 
-GitHub Actions now uses three workflows:
+GitHub Actions workflow: `.github/workflows/staging-tests.yml`
 
-- `ci-pipeline.yml`: main entrypoint for pushes and pull requests to `staging`
-- `individual-backend-tests.yml`: reusable/manual workflow that runs one Django app per matrix job
-- `e2e-tests.yml`: reusable/manual Playwright workflow with uploaded reports and traces
+Runs on pull requests and pushes to `staging`:
 
-The main CI pipeline runs:
-
-- backend Django tests split by app
-- frontend lint and build
-- Playwright e2e tests with Chromium after backend and frontend succeed
+1. **backend** — `python manage.py test`
+2. **frontend** — `npm run lint` and `npm run build`
+3. **e2e** — `npm run e2e` (depends on jobs 1 and 2)
 
 Next recommended additions:
 
-- API integration tests for admin, technician and arbiter permissions
-- Playwright tests for technician lead status changes
-- Playwright tests for arbiter claim and decision flows
-- component tests for login and dashboard data states
+- Playwright: client registration and `/dashboard` access
+- Playwright: technician lead status changes
+- Playwright: arbiter claim and decision flows
+- API integration tests for additional permission edge cases
