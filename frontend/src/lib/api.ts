@@ -321,36 +321,6 @@ export type Dispute = {
   resolved_at: string | null;
 };
 
-export type PaymentTransaction = {
-  id: number;
-  transaction_type: "deposit" | "remaining" | "refund" | "release" | "hold";
-  amount: string;
-  status: "pending" | "completed" | "failed";
-  provider_reference: string;
-  metadata: Record<string, unknown>;
-  created_at: string;
-};
-
-export type EscrowPayment = {
-  id: number;
-  appointment_id: number | null;
-  auction_id: number | null;
-  client_username: string;
-  technician_name: string;
-  total_amount: string;
-  deposit_amount: string;
-  remaining_amount: string;
-  currency: string;
-  status: "pending_deposit" | "deposit_paid" | "service_completed" | "pending_remaining" | "remaining_paid" | "released" | "refunded" | "disputed" | "cancelled";
-  status_display: string;
-  provider: string;
-  provider_reference: string;
-  metadata: Record<string, unknown>;
-  transactions: PaymentTransaction[];
-  created_at: string;
-  updated_at: string;
-};
-
 export type Rating = {
   id: number;
   author: number;

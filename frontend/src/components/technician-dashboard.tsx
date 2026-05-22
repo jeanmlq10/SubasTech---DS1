@@ -1,21 +1,23 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   CalendarClock,
   ClipboardList,
+  Loader2,
   LogOut,
   MapPin,
   MessageCircle,
   Phone,
   Plus,
+  RefreshCw,
   Trash2,
   UserRound,
   Wrench,
 } from "lucide-react";
 
-import { API_URL, Auction, Category, Dispute, EscrowPayment, OnboardingResponse, Rating, TechnicianLead, TechnicianService } from "@/lib/api";
+import { API_URL, Auction, Category, Dispute, OnboardingResponse, Rating, TechnicianLead, TechnicianService } from "@/lib/api";
 import { clearStoredAuth, restoreSession } from "@/lib/auth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -73,6 +75,19 @@ const appointmentStatusLabel: Record<AppointmentStatus, string> = {
   no_show: "No asistio",
 };
 
+const disputeStatusLabel: Record<Dispute["status"], string> = {
+  open: "Abierta",
+  in_review: "En revision",
+  resolved: "Resuelta",
+  rejected: "Rechazada",
+};
+
+const disputeDecisionLabel: Record<Dispute["decision"], string> = {
+  pending: "Pendiente",
+  favor_client: "A favor del cliente",
+  favor_technician: "A favor del tecnico",
+  partial: "Resolucion parcial",
+};
 
 function formatDateTime(value: string) {
   return new Intl.DateTimeFormat("es-CO", {
@@ -98,7 +113,6 @@ export function TechnicianDashboard() {
   const [auctions, setAuctions] = useState<Auction[]>([]);
   const [ratings, setRatings] = useState<Rating[]>([]);
   const [disputes, setDisputes] = useState<Dispute[]>([]);
-  const [payments, setPayments] = useState<EscrowPayment[]>([]);
   const [bidDrafts, setBidDrafts] = useState<Record<number, BidDraft>>({});
   const [serviceForm, setServiceForm] = useState<ServiceForm>(emptyServiceForm);
   const [status, setStatus] = useState<ApiState>("loading");
@@ -130,7 +144,7 @@ export function TechnicianDashboard() {
           Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
         };
-        const [onboardingResponse, categoryResponse, servicesResponse, leadsResponse, auctionsResponse, ratingsResponse, disputesResponse, paymentsResponse] = await Promise.all([
+        const [onboardingResponse, categoryResponse, servicesResponse, leadsResponse, auctionsResponse, ratingsResponse, disputesResponse] = await Promise.all([
           fetch(`${API_URL}/technician/onboarding/`, { headers: requestHeaders, cache: "no-store" }),
           fetch(`${API_URL}/categories/`, { cache: "no-store" }),
           fetch(`${API_URL}/technician/services/`, { headers: requestHeaders, cache: "no-store" }),
@@ -138,7 +152,6 @@ export function TechnicianDashboard() {
           fetch(`${API_URL}/auctions/`, { headers: requestHeaders, cache: "no-store" }),
           fetch(`${API_URL}/ratings/`, { headers: requestHeaders, cache: "no-store" }),
           fetch(`${API_URL}/disputes/`, { headers: requestHeaders, cache: "no-store" }),
-          fetch(`${API_URL}/payments/`, { headers: requestHeaders, cache: "no-store" }),
         ]);
 
         if (
@@ -148,8 +161,7 @@ export function TechnicianDashboard() {
           !leadsResponse.ok ||
           !auctionsResponse.ok ||
           !ratingsResponse.ok ||
-          !disputesResponse.ok ||
-          !paymentsResponse.ok
+          !disputesResponse.ok
         ) {
           throw new Error("Workspace request failed");
         }
@@ -166,7 +178,6 @@ export function TechnicianDashboard() {
         setAuctions((await auctionsResponse.json()) as Auction[]);
         setRatings((await ratingsResponse.json()) as Rating[]);
         setDisputes((await disputesResponse.json()) as Dispute[]);
-        setPayments((await paymentsResponse.json()) as EscrowPayment[]);
         setStatus("success");
         setMessage("Workspace sincronizado.");
       } catch {
@@ -208,7 +219,7 @@ export function TechnicianDashboard() {
     return () => clearInterval(interval);
   }, [token, loadWorkspace]);
 
-  async function submitService(event: { preventDefault(): void }) {
+  async function submitService(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!token) {
       setMessage("Inicia sesion antes de crear servicios.");
@@ -602,20 +613,6 @@ export function TechnicianDashboard() {
               ) : (
                 leads.map((lead) => {
                   const appointment = lead.appointment;
-                  const payment = appointment
-                    ? payments.find((p) => p.appointment_id === appointment.id)
-                    : undefined;
-                  const paymentBadgeColor: Record<string, string> = {
-                    pending_deposit: "border-yellow-500/40 text-yellow-300 bg-yellow-500/10",
-                    deposit_paid: "border-emerald-500/40 text-emerald-300 bg-emerald-500/10",
-                    service_completed: "border-teal-500/40 text-teal-300 bg-teal-500/10",
-                    pending_remaining: "border-orange-500/40 text-orange-300 bg-orange-500/10",
-                    remaining_paid: "border-emerald-400/40 text-emerald-200 bg-emerald-400/10",
-                    released: "border-emerald-300/40 text-emerald-100 bg-emerald-300/10",
-                    refunded: "border-slate-400/40 text-slate-300 bg-slate-400/10",
-                    disputed: "border-rose-500/40 text-rose-300 bg-rose-500/10",
-                    cancelled: "border-slate-500/40 text-slate-400 bg-slate-500/10",
-                  };
                   return (
                     <div key={lead.id} className="rounded-2xl border border-white/10 bg-white/[0.07] p-5 shadow-lg">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -636,32 +633,8 @@ export function TechnicianDashboard() {
                               {appointmentStatusLabel[appointment.status]}
                             </Badge>
                           ) : null}
-                          {payment ? (
-                            <Badge className={`border ${paymentBadgeColor[payment.status] ?? "border-white/10 bg-white/10 text-purple-100"}`}>
-                              Pago: {payment.status_display}
-                            </Badge>
-                          ) : null}
                         </div>
                       </div>
-                      {payment ? (
-                        <div className="mt-3 rounded-xl border border-white/10 bg-slate-950/20 p-3">
-                          <p className="text-xs font-medium uppercase tracking-wide text-orange-200">Estado de cobro</p>
-                          <div className="mt-2 grid grid-cols-3 gap-2 text-sm">
-                            <div>
-                              <p className="text-purple-300">Total</p>
-                              <p className="font-semibold text-white">${Number(payment.total_amount).toLocaleString("es-CO")}</p>
-                            </div>
-                            <div>
-                              <p className="text-purple-300">Reserva 10%</p>
-                              <p className="font-semibold text-white">${Number(payment.deposit_amount).toLocaleString("es-CO")}</p>
-                            </div>
-                            <div>
-                              <p className="text-purple-300">Saldo 90%</p>
-                              <p className="font-semibold text-white">${Number(payment.remaining_amount).toLocaleString("es-CO")}</p>
-                            </div>
-                          </div>
-                        </div>
-                      ) : null}
 
                       <div className="mt-5 grid gap-3 md:grid-cols-2">
                         {appointment ? (
