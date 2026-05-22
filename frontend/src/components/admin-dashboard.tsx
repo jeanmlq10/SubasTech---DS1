@@ -1,8 +1,8 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, CheckCircle2, Loader2, LogOut, RefreshCw, ShieldCheck, Star, Users, Wrench } from "lucide-react";
+import { AlertTriangle, CheckCircle2, LogOut, RefreshCw, ShieldCheck, Star, Users, Wrench } from "lucide-react";
 
 import { clearStoredAuth, restoreSession } from "@/lib/auth";
 import { AdminSummary, API_URL, Category, TechnicianDocument, Zone } from "@/lib/api";
@@ -69,6 +69,44 @@ export function AdminDashboard() {
   const [status, setStatus] = useState<ApiState>("idle");
   const [message, setMessage] = useState("Login in /login or use an administrator JWT token to load platform metrics.");
 
+  const loadCatalog = useCallback(async () => {
+    try {
+      const [categoryResponse, zoneResponse] = await Promise.all([fetch(`${API_URL}/categories/`), fetch(`${API_URL}/zones/`)]);
+      if (categoryResponse.ok) setCategories((await categoryResponse.json()) as Category[]);
+      if (zoneResponse.ok) setZones((await zoneResponse.json()) as Zone[]);
+    } catch {
+      setMessage("No se pudo cargar catalogo publico.");
+    }
+  }, []);
+
+  const loadSummary = useCallback(
+    async (accessToken: string) => {
+      if (!accessToken) {
+        setMessage("Add an administrator JWT token before loading metrics.");
+        return;
+      }
+
+      setStatus("loading");
+      try {
+        const [response, documentResponse] = await Promise.all([
+          fetch(`${API_URL}/admin/summary/`, { headers: { Authorization: `Bearer ${accessToken}` } }),
+          fetch(`${API_URL}/technician/documents/`, { headers: { Authorization: `Bearer ${accessToken}` } }),
+        ]);
+        if (!response.ok) throw new Error("Admin summary request failed");
+        if (!documentResponse.ok) throw new Error("Technician documents request failed");
+        setSummary((await response.json()) as AdminSummary);
+        setDocuments((await documentResponse.json()) as TechnicianDocument[]);
+        await loadCatalog();
+        setStatus("success");
+        setMessage("Admin summary loaded.");
+      } catch {
+        setStatus("error");
+        setMessage("Could not load admin summary. Check that the token belongs to an admin user.");
+      }
+    },
+    [loadCatalog],
+  );
+
   useEffect(() => {
     let mounted = true;
 
@@ -77,7 +115,7 @@ export function AdminDashboard() {
       if (mounted && session) {
         setToken(session.accessToken);
         setMessage(`Sesion activa como ${session.user.username} (${session.user.role}).`);
-        await loadSummary();
+        await loadSummary(session.accessToken);
       }
     })();
     void loadCatalog();
@@ -85,13 +123,13 @@ export function AdminDashboard() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [loadSummary]);
 
   useEffect(() => {
     if (!token) return;
-    const interval = setInterval(() => void loadSummary(), 30_000);
+    const interval = setInterval(() => void loadSummary(token), 30_000);
     return () => clearInterval(interval);
-  }, [token]);
+  }, [token, loadSummary]);
 
   function logout() {
     clearStoredAuth();
@@ -111,41 +149,6 @@ export function AdminDashboard() {
     ],
     [summary],
   );
-
-  async function loadCatalog() {
-    try {
-      const [categoryResponse, zoneResponse] = await Promise.all([fetch(`${API_URL}/categories/`), fetch(`${API_URL}/zones/`)]);
-      if (categoryResponse.ok) setCategories((await categoryResponse.json()) as Category[]);
-      if (zoneResponse.ok) setZones((await zoneResponse.json()) as Zone[]);
-    } catch {
-      setMessage("No se pudo cargar catalogo publico.");
-    }
-  }
-
-  async function loadSummary() {
-    if (!token) {
-      setMessage("Add an administrator JWT token before loading metrics.");
-      return;
-    }
-
-    setStatus("loading");
-    try {
-      const [response, documentResponse] = await Promise.all([
-        fetch(`${API_URL}/admin/summary/`, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`${API_URL}/technician/documents/`, { headers: { Authorization: `Bearer ${token}` } }),
-      ]);
-      if (!response.ok) throw new Error("Admin summary request failed");
-      if (!documentResponse.ok) throw new Error("Technician documents request failed");
-      setSummary((await response.json()) as AdminSummary);
-      setDocuments((await documentResponse.json()) as TechnicianDocument[]);
-      await loadCatalog();
-      setStatus("success");
-      setMessage("Admin summary loaded.");
-    } catch {
-      setStatus("error");
-      setMessage("Could not load admin summary. Check that the token belongs to an admin user.");
-    }
-  }
 
   async function reviewDocument(documentId: number, reviewStatus: "approved" | "rejected") {
     if (!token) {
@@ -168,7 +171,7 @@ export function AdminDashboard() {
       if (!response.ok) throw new Error("Document review failed");
       const updatedDocument = (await response.json()) as TechnicianDocument;
       setDocuments((current) => current.map((document) => (document.id === updatedDocument.id ? updatedDocument : document)));
-      await loadSummary();
+      await loadSummary(token);
       setStatus("success");
       setMessage(reviewStatus === "approved" ? "Documento aprobado." : "Documento rechazado.");
     } catch {
@@ -190,7 +193,7 @@ export function AdminDashboard() {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!response.ok) throw new Error("Technician action failed");
-      await loadSummary();
+      await loadSummary(token);
       setStatus("success");
       setMessage("Technician updated.");
     } catch {
@@ -224,7 +227,7 @@ export function AdminDashboard() {
       });
       if (!response.ok) throw new Error("Catalog create failed");
       reset();
-      await loadSummary();
+      await loadSummary(token);
       setStatus("success");
       setMessage(endpoint === "categories" ? "Category created." : "Zone created.");
     } catch {
@@ -253,10 +256,6 @@ export function AdminDashboard() {
               </p>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
-              <Button onClick={loadSummary} disabled={isLoading} className={primaryButtonClass}>
-                {isLoading ? <Loader2 className="mr-2 size-4 animate-spin" /> : <RefreshCw className="mr-2 size-4" />}
-                Sync admin data
-              </Button>
               <Button variant="ghost" onClick={logout} disabled={isLoading} className={ghostButtonClass}>
                 <LogOut className="mr-2 size-4" />
                 Cerrar sesion
