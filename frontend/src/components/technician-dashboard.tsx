@@ -12,6 +12,7 @@ import {
   Phone,
   Plus,
   RefreshCw,
+  Scale,
   Trash2,
   UserRound,
   Wrench,
@@ -44,7 +45,6 @@ type BidDraft = {
   message: string;
   serviceId: string;
   estimatedMinutes: string;
-  availableFrom: string;
 };
 
 const emptyServiceForm: ServiceForm = {
@@ -117,6 +117,9 @@ export function TechnicianDashboard() {
   const [serviceForm, setServiceForm] = useState<ServiceForm>(emptyServiceForm);
   const [status, setStatus] = useState<ApiState>("loading");
   const [message, setMessage] = useState("Cargando tu workspace tecnico...");
+  const [evidenceModalOpen, setEvidenceModalOpen] = useState(false);
+  const [evidenceModalDisputeId, setEvidenceModalDisputeId] = useState<number | null>(null);
+  const [evidenceModalNote, setEvidenceModalNote] = useState("");
 
   const authHeaders = useMemo(
     () => ({
@@ -325,18 +328,27 @@ export function TechnicianDashboard() {
       setMessage("Inicia sesion antes de aportar evidencia.");
       return;
     }
+    setEvidenceModalDisputeId(disputeId);
+    setEvidenceModalNote("");
+    setEvidenceModalOpen(true);
+  }
 
-    const note = window.prompt("Agrega una nota o evidencia textual para el arbitro.");
-    if (!note?.trim()) {
+  async function submitDisputeEvidence() {
+    if (!evidenceModalNote.trim()) {
+      setMessage("La evidencia no puede estar vacía.");
+      return;
+    }
+
+    if (evidenceModalDisputeId === null) {
       return;
     }
 
     setStatus("loading");
     try {
-      const response = await fetch(`${API_URL}/disputes/${disputeId}/evidence/`, {
+      const response = await fetch(`${API_URL}/disputes/${evidenceModalDisputeId}/evidence/`, {
         method: "POST",
         headers: authHeaders,
-        body: JSON.stringify({ note: note.trim() }),
+        body: JSON.stringify({ note: evidenceModalNote.trim() }),
       });
       if (!response.ok) {
         throw new Error("Dispute evidence request failed");
@@ -344,6 +356,9 @@ export function TechnicianDashboard() {
       await loadWorkspace(token);
       setStatus("success");
       setMessage("Evidencia agregada a la disputa.");
+      setEvidenceModalOpen(false);
+      setEvidenceModalDisputeId(null);
+      setEvidenceModalNote("");
     } catch {
       setStatus("error");
       setMessage("No se pudo agregar la evidencia.");
@@ -360,10 +375,12 @@ export function TechnicianDashboard() {
       setMessage("Ingresa el valor de tu oferta.");
       return;
     }
-    if (draft.availableFrom && new Date(draft.availableFrom) <= new Date()) {
-      setMessage("El horario propuesto debe ser una fecha y hora futura.");
+    const minutes = Number(draft.estimatedMinutes);
+    if (!Number.isFinite(minutes) || minutes < 1 || minutes > 480) {
+      setMessage("Los minutos para llegar deben estar entre 1 y 480.");
       return;
     }
+    const availableFrom = new Date(Date.now() + minutes * 60 * 1000).toISOString();
 
     setStatus("loading");
     try {
@@ -375,14 +392,14 @@ export function TechnicianDashboard() {
           service: draft.serviceId ? Number(draft.serviceId) : null,
           amount: draft.amount,
           message: draft.message,
-          estimated_minutes: Number(draft.estimatedMinutes || 60),
-          available_from: draft.availableFrom || null,
+          estimated_minutes: minutes,
+          available_from: availableFrom,
         }),
       });
       if (!response.ok) {
         throw new Error("Bid request failed");
       }
-      setBidDrafts((current) => ({ ...current, [auctionId]: { amount: "", message: "", serviceId: "", estimatedMinutes: "60", availableFrom: "" } }));
+      setBidDrafts((current) => ({ ...current, [auctionId]: { amount: "", message: "", serviceId: "", estimatedMinutes: "" } }));
       await loadWorkspace(token);
       setStatus("success");
       setMessage("Oferta enviada.");
@@ -499,7 +516,7 @@ export function TechnicianDashboard() {
                 </div>
               ) : (
                 openAuctions.map((auction) => {
-                  const draft = bidDrafts[auction.id] ?? { amount: "", message: "", serviceId: "", estimatedMinutes: "60", availableFrom: "" };
+                  const draft = bidDrafts[auction.id] ?? { amount: "", message: "", serviceId: "", estimatedMinutes: "" };
                   const ownBid = auction.bids[0];
                   return (
                     <div key={auction.id} className="rounded-2xl border border-white/10 bg-white/[0.07] p-5 shadow-lg">
@@ -515,57 +532,66 @@ export function TechnicianDashboard() {
                         </div>
                       </div>
 
-                      <div className="mt-4 grid gap-3 md:grid-cols-4">
-                        <Input
-                          type="number"
-                          min="0"
-                          step="1000"
-                          value={draft.amount}
-                          onChange={(event) =>
-                            setBidDrafts((current) => ({ ...current, [auction.id]: { ...draft, amount: event.target.value } }))
-                          }
-                          placeholder="Valor oferta"
-                          className={fieldClass}
-                          disabled={Boolean(ownBid)}
-                        />
-                        <select
-                          value={draft.serviceId}
-                          onChange={(event) =>
-                            setBidDrafts((current) => ({ ...current, [auction.id]: { ...draft, serviceId: event.target.value } }))
-                          }
-                          className={selectClass}
-                          disabled={Boolean(ownBid)}
-                        >
-                          <option value="" className="text-slate-900">
-                            Servicio opcional
-                          </option>
-                          {services.map((service) => (
-                            <option key={service.id} value={service.id} className="text-slate-900">
-                              {service.title}
+                      <div className="mt-4 grid gap-3 md:grid-cols-3">
+                        <div className="space-y-2">
+                          <Label htmlFor={`bid-amount-${auction.id}`} className="text-xs font-medium text-purple-100">
+                            Valor de tu oferta
+                          </Label>
+                          <Input
+                            id={`bid-amount-${auction.id}`}
+                            type="number"
+                            min="0"
+                            step="1000"
+                            value={draft.amount}
+                            onChange={(event) =>
+                              setBidDrafts((current) => ({ ...current, [auction.id]: { ...draft, amount: event.target.value } }))
+                            }
+                            placeholder="Valor oferta"
+                            className={fieldClass}
+                            disabled={Boolean(ownBid)}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor={`bid-service-${auction.id}`} className="text-xs font-medium text-purple-100">
+                            Servicio
+                          </Label>
+                          <select
+                            id={`bid-service-${auction.id}`}
+                            value={draft.serviceId}
+                            onChange={(event) =>
+                              setBidDrafts((current) => ({ ...current, [auction.id]: { ...draft, serviceId: event.target.value } }))
+                            }
+                            className={selectClass}
+                            disabled={Boolean(ownBid)}
+                          >
+                            <option value="" className="text-slate-900">
+                              Servicio opcional
                             </option>
-                          ))}
-                        </select>
-                        <Input
-                          type="number"
-                          min="15"
-                          value={draft.estimatedMinutes}
-                          onChange={(event) =>
-                            setBidDrafts((current) => ({ ...current, [auction.id]: { ...draft, estimatedMinutes: event.target.value } }))
-                          }
-                          placeholder="Minutos estimados"
-                          className={fieldClass}
-                          disabled={Boolean(ownBid)}
-                        />
-                        <Input
-                          type="datetime-local"
-                          value={draft.availableFrom}
-                          min={new Date().toISOString().slice(0, 16)}
-                          onChange={(event) =>
-                            setBidDrafts((current) => ({ ...current, [auction.id]: { ...draft, availableFrom: event.target.value } }))
-                          }
-                          className={fieldClass}
-                          disabled={Boolean(ownBid)}
-                        />
+                            {services.map((service) => (
+                              <option key={service.id} value={service.id} className="text-slate-900">
+                                {service.title}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-xs font-medium text-purple-100">
+                            Minutos para llegar
+                          </Label>
+                          <Input
+                            id={`arrival-minutes-${auction.id}`}
+                            type="number"
+                            min="1"
+                            max="480"
+                            value={draft.estimatedMinutes}
+                            onChange={(event) =>
+                              setBidDrafts((current) => ({ ...current, [auction.id]: { ...draft, estimatedMinutes: event.target.value } }))
+                            }
+                            placeholder="Minutos para llegar"
+                            className={fieldClass}
+                            disabled={Boolean(ownBid)}
+                          />
+                        </div>
                       </div>
                       <Textarea
                         value={draft.message}
@@ -689,7 +715,7 @@ export function TechnicianDashboard() {
                       </div>
 
                       {appointment && ["pending", "confirmed", "rescheduled"].includes(appointment.status) ? (
-                        <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                        <div className="mt-4 flex justify-end gap-2">
                           {appointment.technician_status !== "on_the_way" && appointment.technician_status !== "arrived" ? (
                             <Button
                               size="sm"
@@ -710,24 +736,77 @@ export function TechnicianDashboard() {
                               He llegado
                             </Button>
                           ) : null}
+                          {appointment ? (
+                            <Button
+                              size="sm"
+                              className="bg-gradient-to-r from-emerald-400 to-teal-500 font-semibold text-white hover:from-emerald-500 hover:to-teal-600"
+                              onClick={() => void completeAppointment(appointment.id)}
+                              disabled={isLoading || appointment.status === "completed"}
+                            >
+                              Completar cita
+                            </Button>
+                          ) : null}
                         </div>
                       ) : null}
 
-                      <div className="mt-2 grid gap-2 sm:grid-cols-4">
-                        {appointment ? (
-                          <Button
-                            size="sm"
-                            className="bg-gradient-to-r from-emerald-400 to-teal-500 font-semibold text-white hover:from-emerald-500 hover:to-teal-600"
-                            onClick={() => void completeAppointment(appointment.id)}
-                            disabled={isLoading || appointment.status === "completed"}
-                          >
-                            Completar cita
-                          </Button>
-                        ) : null}
-                      </div>
                     </div>
                   );
                 })
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className={`${surfaceClass} border-white/10 bg-white/5 text-white`}>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-3 text-white">
+              <span className="rounded-xl bg-white/10 p-2 text-amber-300">
+                <Scale className="size-5" />
+              </span>
+              Disputas activas
+            </CardTitle>
+            <CardDescription className="text-purple-200">
+              Reporte de disputas abiertas o en revisión.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Separator className="mb-5 bg-white/10" />
+            <div className="grid gap-4">
+              {activeDisputes.length === 0 ? (
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-5 text-center text-sm text-purple-100">
+                  No tienes disputas activas.
+                </div>
+              ) : (
+                activeDisputes.map((dispute) => (
+                  <div key={dispute.id} className="rounded-2xl border border-white/10 bg-white/[0.07] p-5 shadow-lg">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.24em] text-orange-200">Disputa #{dispute.id}</p>
+                        {dispute.description && (
+                          <h3 className="mt-2 text-xl font-semibold text-white">{dispute.description}</h3>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Badge className="border-white/10 bg-white/10 text-purple-100 hover:bg-white/10">
+                          {disputeStatusLabel[dispute.status]}
+                        </Badge>
+                        <Badge className="border-white/10 bg-white/10 text-purple-100 hover:bg-white/10">
+                          {disputeDecisionLabel[dispute.decision]}
+                        </Badge>
+                      </div>
+                    </div>
+                    <div className="mt-4 flex justify-end">
+                      <Button
+                        size="sm"
+                        className="bg-gradient-to-r from-amber-500 to-orange-500 font-semibold text-white hover:from-amber-600 hover:to-orange-600"
+                        onClick={() => void addDisputeEvidence(dispute.id)}
+                      >
+                        <MessageCircle className="mr-2 size-4" />
+                        Agregar evidencia
+                      </Button>
+                    </div>
+                  </div>
+                ))
               )}
             </div>
           </CardContent>
@@ -925,6 +1004,51 @@ export function TechnicianDashboard() {
             </div>
           </CardContent>
         </Card>
+
+        {/* Evidence Modal */}
+        {evidenceModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+            <div
+              className={`${surfaceClass} w-full max-w-md transform transition-all duration-200 ${
+                evidenceModalOpen ? "scale-100 opacity-100" : "scale-95 opacity-0"
+              }`}
+            >
+              <div className="space-y-4 p-6">
+                <h2 className="text-lg font-bold text-white">Agregar evidencia</h2>
+                <p className="text-sm text-purple-100">
+                  Escribe una nota o evidencia textual para el árbitro.
+                </p>
+                <Textarea
+                  value={evidenceModalNote}
+                  onChange={(e) => setEvidenceModalNote(e.target.value)}
+                  placeholder="Describe los detalles de tu evidencia..."
+                  className={fieldClass}
+                  rows={5}
+                />
+                <div className="flex gap-2">
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      setEvidenceModalOpen(false);
+                      setEvidenceModalDisputeId(null);
+                      setEvidenceModalNote("");
+                    }}
+                    className="flex-1 border border-white/10 text-purple-100 hover:bg-white/10 hover:text-white"
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    onClick={() => void submitDisputeEvidence()}
+                    disabled={isLoading || !evidenceModalNote.trim()}
+                    className="flex-1 bg-gradient-to-r from-orange-400 to-rose-500 font-semibold text-white hover:from-orange-500 hover:to-rose-600"
+                  >
+                    Enviar evidencia
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

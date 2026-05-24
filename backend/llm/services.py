@@ -39,9 +39,10 @@ def interpret_message(message: str, *, client: GeminiIntentClient | None = None)
         payload = llm_client.interpret(message)
         return _normalize_result(payload, provider="gemini")
     except Exception as exc:
-        logging.getLogger(__name__).warning(
-            "LLM provider failed, using rules fallback: %s", exc
-        )
+        if "429" in str(exc):
+            logger.error("🚨 GEMINI QUOTA EXHAUSTED - Replace API key in .env [GEMINI_API_KEY]")
+        else:
+            logger.warning("LLM provider failed, using rules fallback: %s", exc)
         return rules_fallback(message)
 
 

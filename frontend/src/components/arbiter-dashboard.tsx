@@ -28,6 +28,12 @@ const selectClass = "h-10 w-full rounded-md border border-white/20 bg-white/10 p
 const badgeClass = "border-white/10 bg-white/10 text-purple-100 hover:bg-white/10";
 const ghostButtonClass = "border border-white/10 text-purple-100 hover:bg-white/10 hover:text-white";
 const primaryButtonClass = "bg-gradient-to-r from-orange-400 to-rose-500 font-semibold text-white hover:from-orange-500 hover:to-rose-600";
+const disputeStatusLabel: Record<string, string> = {
+  open: "Abierta",
+  in_review: "En revisión",
+  resolved: "Resuelta",
+  rejected: "Rechazada",
+};
 
 export function ArbiterDashboard() {
   const router = useRouter();
@@ -36,25 +42,35 @@ export function ArbiterDashboard() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [decision, setDecision] = useState("favor_client");
   const [notes, setNotes] = useState("");
-  const [status, setStatus] = useState<ApiState>("idle");
-  const [message, setMessage] = useState("Login in /login or use an arbiter JWT token to load disputes.");
+  const [status, setStatus] = useState<ApiState>("loading");
+  const [message, setMessage] = useState("Cargando panel de arbitraje...");
 
   useEffect(() => {
     let mounted = true;
 
     void (async () => {
       const session = await restoreSession();
-      if (mounted && session) {
-        setToken(session.accessToken);
-        setMessage(`Sesion activa como ${session.user.username} (${session.user.role}).`);
-        await loadQueue();
+      if (!mounted) {
+        return;
       }
+      if (!session) {
+        router.replace("/login");
+        return;
+      }
+      const validRoles = ["arbiter", "admin", "staff"];
+      if (!validRoles.includes(session.user.role)) {
+        router.replace("/login");
+        return;
+      }
+      setToken(session.accessToken);
+      setMessage(`Sesion activa como ${session.user.username} (${session.user.role}).`);
+      await loadQueue(session.accessToken);
     })();
 
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     if (!token) return;
@@ -73,16 +89,17 @@ export function ArbiterDashboard() {
     [queue.disputes, selectedId],
   );
 
-  async function loadQueue() {
-    if (!token) {
-      setMessage("Add an arbiter JWT token before loading disputes.");
+  async function loadQueue(accessToken?: string) {
+    const tokenToUse = accessToken || token;
+    if (!tokenToUse) {
+      setMessage("No token available. Please log in again.");
       return;
     }
 
     setStatus("loading");
     try {
       const response = await fetch(`${API_URL}/arbiter/queue/`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${tokenToUse}` },
       });
       if (!response.ok) {
         throw new Error("Arbiter queue request failed");
@@ -207,7 +224,7 @@ export function ArbiterDashboard() {
                             {dispute.client_name} vs {dispute.technician_name}
                           </p>
                         </div>
-                        <Badge className={badgeClass}>{dispute.status}</Badge>
+                        <Badge className={badgeClass}>{disputeStatusLabel[dispute.status] ?? dispute.status}</Badge>
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <Badge className={badgeClass}>{dispute.priority}</Badge>
@@ -246,7 +263,7 @@ export function ArbiterDashboard() {
                           </TableCell>
                           <TableCell className="text-purple-100">{dispute.priority}</TableCell>
                           <TableCell>
-                            <Badge className={badgeClass}>{dispute.status}</Badge>
+                            <Badge className={badgeClass}>{disputeStatusLabel[dispute.status] ?? dispute.status}</Badge>
                           </TableCell>
                           <TableCell className="text-right">
                             <Button

@@ -84,10 +84,10 @@ AUCTION_CHOICES = {"0", "ofertas", "oferta", "subasta", "recibir ofertas", "quie
 RESET_CHOICES = {"inicio", "menu", "menú", "volver", "reiniciar", "empezar", "cancelar flujo"}
 RESET_HINT = "Escribe INICIO para volver al principio."
 CONTACT_PROMPTS = {
-    "full_name": "Antes de agendar, necesito tus datos. Escribeme tu nombre completo.",
-    "phone_number": "Ahora comparte tu numero de celular en formato nacional o internacional.",
-    "email": "Comparte tu correo electronico para enviarte el resumen de la cita.",
-    "address": "Por ultimo, escribeme la direccion del servicio.",
+    "full_name": "Antes de confirmar tu cita, necesito algunos datos 📋\n¿Cuál es tu nombre completo?",
+    "phone_number": "Gracias. Ahora compárteme tu número de celular.",
+    "email": "Perfecto. Ahora digita tu correo electrónico",
+    "address": "Por último, escríbeme la dirección donde será el servicio.",
 }
 CONTACT_STEP_BY_FIELD = {
     "full_name": "waiting_contact_name",
@@ -200,11 +200,15 @@ def _handle_rating_submission(session: ChatSession, text: str, state: dict) -> s
 
 def _build_welcome_message() -> str:
     return (
-        "Hola, soy el asistente de SubasTech.\n\n"
-        "Puedo ayudarte a encontrar tecnicos del hogar y agendar una cita.\n\n"
-        "Que servicio necesitas?\n"
-        "1. Electricista\n2. Plomero\n3. Cerrajero\n4. Mantenimiento general\n\n"
-        "Tambien puedes describirme tu problema."
+        "¡Hola! 👋 Soy el asistente de SubasTech.\n\n"
+        "Estoy aquí para ayudarte a encontrar técnicos del hogar de confianza "
+        "en Barranquilla y agendar tu cita fácilmente.\n\n"
+        "¿Qué necesitas hoy?\n"
+        "🔌 1. Electricista\n"
+        "🚿 2. Plomero\n"
+        "🔐 3. Cerrajero\n"
+        "🔧 4. Mantenimiento general\n\n"
+        "También puedes describirme tu problema directamente."
     )
 
 
@@ -445,8 +449,8 @@ def handle_conversation(session: ChatSession, text: str, intent: dict) -> str:
         return _start_booking_flow(session, cleaned_text, intent)
 
     return (
-        "No entendi tu mensaje.\n\n"
-        "Puedes decirme cosas como:\n"
+        "No entendí bien lo que necesitas 🤔\n"
+        "Puedes decirme por ejemplo:\n"
         "- Necesito un electricista en Riomar\n"
         "- Quiero cancelar mi cita\n"
         "- Cancelar mi subasta\n"
@@ -738,11 +742,12 @@ def _create_auction_from_chat(session: ChatSession, state: dict) -> str:
     )
     _reset_session(session)
     return (
-        "Subasta creada para recibir ofertas de tecnicos verificados.\n\n"
+        "¡Tu subasta está activa! 🔨\n"
+        "Ya notifiqué a los técnicos disponibles para que te envíen sus ofertas.\n\n"
         f"Solicitud: {auction.title}\n"
         f"Zona: {auction.location or 'Sin zona'}\n"
         f"Numero de subasta: {auction.id}\n\n"
-        "Te avisare por Telegram cada vez que un tecnico envie una oferta.\n"
+        "Te avisaré por Telegram cada vez que un técnico envíe una oferta.\n"
         "Para aceptar, responde ACEPTO: Nombre Tecnico cuando recibas la oferta."
     )
 
@@ -801,7 +806,8 @@ def _handle_bid_acceptance(session: ChatSession, text: str) -> str:
 
     _reset_session(session)
     return (
-        "Oferta aceptada y cita creada.\n\n"
+        "¡Perfecto, oferta aceptada! 🎉\n"
+        "Tu cita quedó confirmada con estos datos:\n\n"
         f"Tecnico: {_bid_technician_name(bid)}\n"
         f"Servicio: {bid.service.title if bid.service else 'Servicio tecnico'}\n"
         f"Horario: {_format_local_datetime(appointment.scheduled_start)} - {_format_local_time(appointment.scheduled_end)}\n"
@@ -929,9 +935,9 @@ def _handle_cancel_target(session: ChatSession, text: str, state: dict) -> str:
 def _handle_cancel_confirmation(session: ChatSession, lowered_text: str, state: dict) -> str:
     if lowered_text in NO_CHOICES:
         _reset_session(session)
-        return "Cancelacion descartada."
+        return "Listo, dejamos la cancelacion quieta."
     if lowered_text not in YES_CHOICES:
-        return "Responde SI para confirmar la cancelacion o NO para descartarla."
+        return "Para estar seguros, responde SI para confirmar la cancelacion o NO para descartarla."
 
     cancel_target = state.get("cancel_target", "appointment")
 
@@ -939,28 +945,28 @@ def _handle_cancel_confirmation(session: ChatSession, lowered_text: str, state: 
         auction = Auction.objects.filter(pk=state.get("auction_id"), status=Auction.Status.OPEN).first()
         if auction is None:
             _reset_session(session)
-            return "Ya no encontre esa subasta abierta para cancelar."
+            return "Ya no encontré esa subasta abierta para cancelar."
         with transaction.atomic():
             Bid.objects.filter(auction=auction, status=Bid.Status.PENDING).update(status=Bid.Status.REJECTED)
             auction.status = Auction.Status.CANCELLED
             auction.save(update_fields=["status", "updated_at"])
         _reset_session(session)
-        return f"Subasta #{auction.id} cancelada. Las ofertas pendientes fueron rechazadas."
+        return f"Listo, cancelé la subasta #{auction.id}. ❌\nLas ofertas pendientes fueron rechazadas."
 
     appointment = _get_owned_appointment(session, state.get("appointment_id"))
     if appointment is None:
         _reset_session(session)
-        return "Ya no encontre esa cita activa para cancelar."
+        return "Ya no encontré esa cita activa para cancelar."
     cancel_appointment(appointment, actor=session.user, reason=DEFAULT_CANCELLATION_REASON)
     _reset_session(session)
-    return f"Cita cancelada correctamente.\n\n{_format_appointment_summary(appointment)}"
+    return f"Listo, cancelé tu cita. ❌\n\n{_format_appointment_summary(appointment)}"
 
 
 def _start_reschedule_flow(session: ChatSession) -> str:
     appointment = _get_upcoming_client_appointment(session)
     if appointment is None:
         _reset_session(session)
-        return "No encontre una cita activa para reagendar."
+        return "No encontré una cita activa para reagendar."
 
     slots = get_available_slots(
         technician=appointment.technician,
@@ -975,7 +981,7 @@ def _start_reschedule_flow(session: ChatSession) -> str:
     ][:DEFAULT_SLOT_COUNT]
     if not slots:
         _reset_session(session)
-        return "No encontre horarios alternos disponibles para reagendar esa cita."
+        return "Hmm, no encontré horarios disponibles para reagendar 😕\nPodemos intentarlo más tarde o revisar otra opción."
 
     serialized_slots = [_serialize_slot(slot) for slot in slots]
     _update_session(
@@ -985,9 +991,9 @@ def _start_reschedule_flow(session: ChatSession) -> str:
     )
     return (
         f"Esta es tu cita actual:\n{_format_appointment_summary(appointment)}\n\n"
-        "Estos son los horarios disponibles para reagendar:\n"
+        "Encontré estos horarios disponibles para reagendar 📅\n"
         f"{_format_slots_list(serialized_slots)}\n\n"
-        "Responde con el numero del nuevo horario."
+        "Responde con el número del nuevo horario."
     )
 
 
@@ -995,12 +1001,12 @@ def _handle_reschedule_slot_selection(session: ChatSession, text: str, state: di
     slots = state.get("slots") or []
     selected_index = _parse_numeric_choice(text, len(slots))
     if selected_index is None:
-        return f"Responde con un numero entre 1 y {len(slots)} para reagendar."
+        return f"Responde con un número entre 1 y {len(slots)} para elegir el nuevo horario."
 
     appointment = _get_owned_appointment(session, state.get("appointment_id"))
     if appointment is None:
         _reset_session(session)
-        return "Ya no encontre esa cita activa para reagendar."
+        return "Ya no encontré esa cita activa para reagendar."
 
     selected_slot = slots[selected_index]
     try:
@@ -1013,12 +1019,12 @@ def _handle_reschedule_slot_selection(session: ChatSession, text: str, state: di
         )
     except DjangoValidationError:
         logger.exception("No se pudo reagendar Appointment desde Telegram chatbot")
-        return "No pude reagendar a ese horario porque ya no esta disponible. Responde con otro numero de la lista."
+        return "Ese horario ya no está disponible 😕\nResponde con otro número de la lista para intentarlo de nuevo."
 
     appointment.refresh_from_db()
     _reset_session(session)
     return (
-        "Cita reagendada correctamente.\n\n"
+        "¡Tu cita fue reagendada con éxito! 📅\n\n"
         f"Nuevo horario: {_format_slot_range(selected_slot)}\n"
         f"Cita: {_format_appointment_summary(appointment)}"
     )
@@ -1065,7 +1071,7 @@ def _finalize_booking(session: ChatSession, state: dict) -> str:
 
     _reset_session(session)
     return (
-        "Cita agendada.\n\n"
+        "¡Listo, tu cita quedó agendada! 🎉\n\n"
         f"Cliente: {_display_client_name(session.user)}\n"
         f"Servicio: {service.title}\n"
         f"Tecnico: {technician.user.get_full_name() or technician.user.username}\n"
@@ -1256,14 +1262,16 @@ def _create_chat_lead(session: ChatSession, state: dict, technician: TechnicianP
 
 
 def _build_recommendation_reply(category: str, location: str | None, recommendations: list[dict]) -> str:
-    intro = f"Tecnicos disponibles para {CATEGORY_DISPLAY_NAMES.get(category, category)}"
+    intro = "¡Encontré estos técnicos disponibles! ⚡\n"
     if location:
-        intro += f" en {ZONE_DISPLAY_NAMES.get(location, location)}"
-    intro += ":\n\n"
+        intro += f"Aquí tienes las mejores opciones en {ZONE_DISPLAY_NAMES.get(location, location)}:"
+    else:
+        intro += f"Aquí tienes las mejores opciones para {CATEGORY_DISPLAY_NAMES.get(category, category)}:"
+    intro += "\n\n"
     lines = [intro]
     for index, item in enumerate(recommendations, start=1):
         lines.append(
-            f"{index}. {item['technician_name']} | {item['service_title']} | score {item['score']} | respuesta aprox. {item['response_time_minutes']} min"
+            f"{index}. {item['technician_name']} ⭐ {item['score']} pts — responde en ~{item['response_time_minutes']} min"
         )
     lines.append("\nResponde con el numero del tecnico para ver horarios disponibles.")
     lines.append("Tambien puedes responder 0 para crear una subasta y recibir ofertas.")
@@ -1272,7 +1280,7 @@ def _build_recommendation_reply(category: str, location: str | None, recommendat
 
 def _build_slots_reply(technician_name: str, slots: list[dict]) -> str:
     return (
-        f"Horarios disponibles con {technician_name}:\n"
+        f"Estos son los horarios disponibles con {technician_name} 📅\n"
         f"{_format_slots_list(slots)}\n\n"
         "Responde con el numero del horario que quieres reservar."
     )

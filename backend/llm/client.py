@@ -1,16 +1,19 @@
 import json
+import logging
 import re
 
 from django.conf import settings
 
+logger = logging.getLogger(__name__)
+
 
 class GeminiIntentClient:
     def __init__(self, api_key: str | None = None):
-        self.api_key = api_key if api_key is not None else getattr(settings, "GEMINI_API_KEY", "")
+        self.api_keys = [api_key] if api_key is not None else getattr(settings, "GEMINI_API_KEYS", [])
 
     @property
     def is_configured(self) -> bool:
-        return bool(self.api_key)
+        return bool(self.api_keys)
 
     def interpret(self, message: str) -> dict:
         if not self.is_configured:
@@ -29,26 +32,38 @@ Responde SOLO con JSON válido, sin texto adicional, sin markdown:
 }}
 Mensaje: {message}
 """
-        client = genai.Client(api_key=self.api_key)
         # Retry with exponential backoff on transient errors (e.g., 503)
         import time
         max_attempts = 3
-        delay = 0.5
         last_exc = None
-        for attempt in range(1, max_attempts + 1):
-            try:
-                response = client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=prompt,
-                )
+        response = None
+
+        for key in self.api_keys:
+            client = genai.Client(api_key=key)
+            delay = 0.5
+            key_succeeded = False
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    response = client.models.generate_content(
+                        model="gemini-2.5-flash",
+                        contents=prompt,
+                    )
+                    key_succeeded = True
+                    break
+                except Exception as exc:
+                    last_exc = exc
+                    logger.warning("Gemini call attempt %s failed: %s", attempt, exc)
+                    if attempt == max_attempts:
+                        logger.warning(f"Gemini key ...{key[-4:]} agotada, probando siguiente")
+                        break
+                    time.sleep(delay)
+                    delay *= 2
+
+            if key_succeeded:
                 break
-            except Exception as exc:
-                last_exc = exc
-                logger.warning("Gemini call attempt %s failed: %s", attempt, exc)
-                if attempt == max_attempts:
-                    raise
-                time.sleep(delay)
-                delay *= 2
+        else:
+            raise last_exc
+
         text = (response.text or "").strip()
         if text.startswith("```"):
             text = re.sub(r"```(?:json)?", "", text).strip()

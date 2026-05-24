@@ -145,3 +145,6 @@ TELEGRAM_DRY_RUN = (
     or env("TELEGRAM_DRY_RUN", default="True").lower() == "true"
 )
 GEMINI_API_KEY = env("GEMINI_API_KEY", default="")
+GEMINI_API_KEYS = [k.strip() for k in os.getenv("GEMINI_API_KEYS", "").split(",") if k.strip()]
+if not GEMINI_API_KEYS and GEMINI_API_KEY:
+    GEMINI_API_KEYS = [GEMINI_API_KEY]

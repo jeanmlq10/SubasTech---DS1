@@ -164,14 +164,26 @@ def _notify_telegram_auction_bid(bid: Bid) -> None:
 
     technician_name = bid.technician.user.get_full_name() or bid.technician.user.username
     available_from = bid.available_from.strftime("%Y-%m-%d %H:%M") if bid.available_from else "Sin horario propuesto"
-    message = (
-        f"Nueva oferta para tu solicitud #{auction.id}\n\n"
-        f"Tecnico: {technician_name}\n"
-        f"Servicio: {bid.service.title if bid.service else 'Servicio tecnico'}\n"
-        f"Precio: ${int(bid.amount):,}".replace(",", ".")
-        + f"\nTiempo estimado: {bid.estimated_minutes} min\n"
-        f"Horario propuesto: {available_from}\n\n"
-        "Para aceptar esta oferta responde exactamente:\n"
-        f"ACEPTO: {technician_name}"
-    )
+    service_title = bid.service.title if bid.service else "Servicio tecnico"
+    
+    message_parts = [
+        f"🔨 Nueva oferta para tu solicitud #{auction.id}",
+        "",
+        f"👷 Técnico: {technician_name}",
+        f"🔧 Servicio: {service_title}",
+        f"💰 Precio: ${int(bid.amount):,}".replace(",", "."),
+        f"⏱ Llega en: {bid.estimated_minutes} min",
+        f"🕐 Horario propuesto: {available_from}",
+    ]
+    
+    if bid.message and bid.message.strip():
+        message_parts.append(f"💬 Mensaje: {bid.message}")
+    
+    message_parts.extend([
+        "",
+        "Para aceptar responde exactamente:",
+        f"ACEPTO: {technician_name}",
+    ])
+    
+    message = "\n".join(message_parts)
     TelegramBotClient().send_message(build_telegram_message_payload(chat_id=int(chat_id), text=message, preview_url=False))
