@@ -37,7 +37,15 @@ def interpret_message(message: str, *, client: GeminiIntentClient | None = None)
         return deterministic
 
     rules_result = rules_fallback(message)
-    if rules_result["categoria"] is not None and rules_result["accion"] != "otro":
+    text_norm = normalize_text(message)
+    categories_found = [
+        slug for slug, keywords in CATEGORY_KEYWORDS.items()
+        if any(kw in text_norm for kw in keywords)
+    ]
+    if len(categories_found) > 1:
+        # Mensaje ambiguo con múltiples categorías, dejar que Gemini decida
+        pass
+    elif rules_result["categoria"] is not None and rules_result["accion"] != "otro":
         rules_result["confidence"] = 0.80
         return rules_result
 
