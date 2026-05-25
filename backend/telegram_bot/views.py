@@ -397,6 +397,10 @@ def handle_conversation(session: ChatSession, text: str, intent: dict) -> str:
     lowered = cleaned_text.lower()
     accion = (intent.get("accion") or "").lower()
 
+    if cleaned_text in CATEGORY_CHOICES and step in {"initial", "waiting_category"}:
+        intent = {"accion": "agendar", "categoria": CATEGORY_CHOICES[cleaned_text], "zona": None}
+        accion = "agendar"
+
     from llm.services import CATEGORY_KEYWORDS, normalize_text
 
     categorias_detectadas = []
@@ -417,10 +421,6 @@ def handle_conversation(session: ChatSession, text: str, intent: dict) -> str:
                 "- Se me daño el chorro del bano\n"
                 "- Quiero cancelar mi cita"
             )
-
-    if cleaned_text in CATEGORY_CHOICES and step in {"initial", "waiting_category"}:
-        intent = {"accion": "agendar", "categoria": CATEGORY_CHOICES[cleaned_text], "zona": None}
-        accion = "agendar"
 
     if lowered in RESET_CHOICES:
         _reset_session(session)
