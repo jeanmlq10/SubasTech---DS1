@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import threading
 import unicodedata
 from datetime import datetime, timedelta
 
@@ -690,7 +691,29 @@ def _handle_auction_address(session: ChatSession, text: str, state: dict) -> str
     return _create_auction_from_chat(session, updated_state)
 
 
+def _expire_telegram_auction_after_timeout(auction_id: int, chat_id: int) -> None:
+    try:
+        auction = Auction.objects.get(pk=auction_id)
+    except Auction.DoesNotExist:
+        return
+    if auction.status != Auction.Status.OPEN:
+        return
+    had_bids = auction.bids.exists()
+    auction.status = Auction.Status.EXPIRED
+    auction.save(update_fields=["status", "updated_at"])
+    if not had_bids:
+        send_telegram_message(
+            chat_id,
+            (
+                f"⏰ Tu subasta #{auction_id} cerró sin ofertas esta vez.\n"
+                "Escribe INICIO si quieres intentarlo de nuevo."
+            ),
+        )
+
+
 def _create_auction_from_chat(session: ChatSession, state: dict) -> str:
+    from django.utils.timezone import now
+
     if session.user_id is None:
         _ensure_client_user(session, state)
 
@@ -704,6 +727,7 @@ def _create_auction_from_chat(session: ChatSession, state: dict) -> str:
         return "No pude crear la subasta porque no identifique la categoria. Intenta de nuevo desde el inicio."
 
     zone = _find_zone(state.get("zona"))
+    expires_at = now() + timedelta(minutes=settings.AUCTION_DURATION_MINUTES)
     with transaction.atomic():
         previous_auctions = Auction.objects.filter(
             source=Auction.Source.TELEGRAM,
@@ -721,6 +745,7 @@ def _create_auction_from_chat(session: ChatSession, state: dict) -> str:
             location=ZONE_DISPLAY_NAMES.get(state.get("zona"), state.get("zona") or ""),
             urgency="normal",
             source=Auction.Source.TELEGRAM,
+            expires_at=expires_at,
             metadata={
                 "source": CHATBOT_SOURCE,
                 "chat_id": session.chat_id,
@@ -729,6 +754,11 @@ def _create_auction_from_chat(session: ChatSession, state: dict) -> str:
                 "client_address": state.get("auction_address") or (getattr(session.user, "address", "") if session.user else ""),
             },
         )
+    threading.Timer(
+        settings.AUCTION_DURATION_MINUTES * 60,
+        _expire_telegram_auction_after_timeout,
+        args=[auction.id, session.chat_id],
+    ).start()
     log_audit_event(
         event_type=AuditEvent.EventType.LEAD_CREATED,
         actor=session.user,
@@ -741,13 +771,15 @@ def _create_auction_from_chat(session: ChatSession, state: dict) -> str:
         metadata={"category_id": category.id, "zone_id": zone.id if zone else None},
     )
     _reset_session(session)
+    duration_minutes = settings.AUCTION_DURATION_MINUTES
     return (
         "¡Tu subasta está activa! 🔨\n"
         "Ya notifiqué a los técnicos disponibles para que te envíen sus ofertas.\n\n"
         f"Solicitud: {auction.title}\n"
         f"Zona: {auction.location or 'Sin zona'}\n"
         f"Numero de subasta: {auction.id}\n\n"
-        "Te avisaré por Telegram cada vez que un técnico envíe una oferta.\n"
+        f"⏱ Tu subasta estará activa por {duration_minutes} minutos.\n"
+        "Te notificaré cada oferta que llegue por aquí.\n\n"
         "Para aceptar, responde ACEPTO: Nombre Tecnico cuando recibas la oferta."
     )
 

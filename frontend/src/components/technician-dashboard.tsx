@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   CalendarClock,
   ClipboardList,
+  Clock,
   Loader2,
   LogOut,
   MapPin,
@@ -19,6 +20,42 @@ import {
 } from "lucide-react";
 
 import { API_URL, Auction, Category, Dispute, OnboardingResponse, Rating, TechnicianLead, TechnicianService } from "@/lib/api";
+
+type AuctionWithExpiry = Auction & { expires_at?: string | null };
+
+function formatAuctionCountdown(remainingMs: number): string {
+  const totalSeconds = Math.max(0, Math.floor(remainingMs / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  }
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function isAuctionVisible(auction: AuctionWithExpiry, nowMs: number): boolean {
+  if (auction.status !== "open") {
+    return false;
+  }
+  if (!auction.expires_at) {
+    return true;
+  }
+  return new Date(auction.expires_at).getTime() > nowMs;
+}
+
+function AuctionCountdown({ expiresAt, nowMs }: { expiresAt: string; nowMs: number }) {
+  const remainingMs = new Date(expiresAt).getTime() - nowMs;
+  if (remainingMs <= 0) {
+    return null;
+  }
+  return (
+    <Badge className="border-orange-400/30 bg-orange-500/20 text-orange-100 hover:bg-orange-500/20">
+      <Clock className="mr-1 size-3" />
+      {formatAuctionCountdown(remainingMs)}
+    </Badge>
+  );
+}
 import { clearStoredAuth, restoreSession } from "@/lib/auth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -120,6 +157,7 @@ export function TechnicianDashboard() {
   const [evidenceModalOpen, setEvidenceModalOpen] = useState(false);
   const [evidenceModalDisputeId, setEvidenceModalDisputeId] = useState<number | null>(null);
   const [evidenceModalNote, setEvidenceModalNote] = useState("");
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   const authHeaders = useMemo(
     () => ({
@@ -221,6 +259,11 @@ export function TechnicianDashboard() {
     const interval = setInterval(() => void loadWorkspace(token), 30_000);
     return () => clearInterval(interval);
   }, [token, loadWorkspace]);
+
+  useEffect(() => {
+    const interval = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   async function submitService(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -435,7 +478,7 @@ export function TechnicianDashboard() {
 
   const isLoading = status === "loading";
   const scheduledLeads = leads.filter((lead) => lead.appointment !== null).length;
-  const openAuctions = auctions.filter((auction) => auction.status === "open");
+  const openAuctions = (auctions as AuctionWithExpiry[]).filter((auction) => isAuctionVisible(auction, nowMs));
   const activeDisputes = disputes.filter((dispute) => dispute.status !== "resolved");
   const receivedRatings = ratings.filter((rating) => rating.target_role === "technician");
   const averageRating = receivedRatings.length
@@ -529,6 +572,9 @@ export function TechnicianDashboard() {
                         <div className="flex flex-wrap gap-2">
                           <Badge className="border-white/10 bg-white/10 text-purple-100 hover:bg-white/10">{auction.category_name}</Badge>
                           <Badge className="border-white/10 bg-white/10 text-purple-100 hover:bg-white/10">{auction.location || auction.zone_name || "Sin zona"}</Badge>
+                          {(auction as AuctionWithExpiry).expires_at ? (
+                            <AuctionCountdown expiresAt={(auction as AuctionWithExpiry).expires_at!} nowMs={nowMs} />
+                          ) : null}
                         </div>
                       </div>
 

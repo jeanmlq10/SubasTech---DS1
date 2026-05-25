@@ -26,6 +26,7 @@ class Auction(models.Model):
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.OPEN)
     source = models.CharField(max_length=20, choices=Source.choices, default=Source.DASHBOARD)
     closes_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
     winning_bid = models.ForeignKey("auctions.Bid", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
     metadata = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

@@ -1,4 +1,8 @@
+from datetime import timedelta
+
+from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.utils import timezone
 from django.db import IntegrityError
 from django.db.models import Q
 from rest_framework import permissions, status, viewsets
@@ -45,7 +49,13 @@ class AuctionViewSet(viewsets.ModelViewSet):
             raise PermissionDenied("Only clients can create auctions.")
         if getattr(user, "auction_blocked", False) and not _is_admin(user):
             raise PermissionDenied("Tu cuenta tiene restringida la creación de subastas por disputas perdidas.")
-        serializer.save(client=user, source=Auction.Source.DASHBOARD, status=Auction.Status.OPEN)
+        expires_at = timezone.now() + timedelta(minutes=settings.AUCTION_DURATION_MINUTES)
+        serializer.save(
+            client=user,
+            source=Auction.Source.DASHBOARD,
+            status=Auction.Status.OPEN,
+            expires_at=expires_at,
+        )
 
     def perform_update(self, serializer):
         auction = serializer.instance

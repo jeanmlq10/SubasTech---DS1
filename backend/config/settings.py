@@ -139,6 +139,8 @@ CORS_ALLOWED_ORIGINS = [
 ]
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
 
+AUCTION_DURATION_MINUTES = 10
+
 TELEGRAM_BOT_TOKEN = env("TELEGRAM_BOT_TOKEN", default="")
 TELEGRAM_DRY_RUN = (
     os.getenv("USE_SQLITE_FOR_TESTS", "False").lower() == "true"

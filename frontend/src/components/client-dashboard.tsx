@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
 
 const sidebarLinks = [
   { href: "#overview", label: "Resumen", icon: LayoutDashboard },
@@ -57,6 +58,13 @@ export function ClientDashboard() {
     location: "",
     budgetMax: "",
   });
+  const [evidenceModalOpen, setEvidenceModalOpen] = useState(false);
+  const [evidenceModalDisputeId, setEvidenceModalDisputeId] = useState<number | null>(null);
+  const [evidenceModalNote, setEvidenceModalNote] = useState("");
+  const [disputeModalOpen, setDisputeModalOpen] = useState(false);
+  const [disputeModalAppointment, setDisputeModalAppointment] = useState<Appointment | null>(null);
+  const [disputeModalReason, setDisputeModalReason] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -120,7 +128,8 @@ export function ClientDashboard() {
       }
       setCategories((await categoryResponse.json()) as Category[]);
       setZones((await zoneResponse.json()) as Zone[]);
-      setAuctions((await auctionResponse.json()) as Auction[]);
+      const allAuctions = (await auctionResponse.json()) as Auction[];
+      setAuctions(allAuctions.filter(a => !a.expires_at || new Date(a.expires_at) > new Date()));
       setAppointments((await appointmentResponse.json()) as Appointment[]);
       setDisputes((await disputeResponse.json()) as Dispute[]);
       setRatings((await ratingResponse.json()) as Rating[]);
@@ -246,26 +255,36 @@ export function ClientDashboard() {
     }
   }
 
-  async function openAppointmentDispute(appointment: Appointment) {
+  function openAppointmentDispute(appointment: Appointment) {
     if (!token) {
       setMessage("Inicia sesion antes de abrir una disputa.");
       return;
     }
+    setDisputeModalAppointment(appointment);
+    setDisputeModalReason("");
+    setDisputeModalOpen(true);
+  }
 
-    const reason = window.prompt("Describe brevemente el problema con esta cita.");
-    if (!reason?.trim()) {
+  async function submitAppointmentDispute() {
+    if (!disputeModalReason.trim()) {
+      setMessage("Describe el problema con la cita.");
       return;
     }
 
+    if (!disputeModalAppointment || !token) {
+      return;
+    }
+
+    setIsSubmitting(true);
     try {
       const response = await fetch(`${API_URL}/disputes/`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          technician: appointment.technician,
-          service: appointment.service,
-          title: `Disputa por cita #${appointment.id}`,
-          description: reason.trim(),
+          technician: disputeModalAppointment.technician,
+          service: disputeModalAppointment.service,
+          title: `Disputa por cita #${disputeModalAppointment.id}`,
+          description: disputeModalReason.trim(),
           priority: "normal",
         }),
       });
@@ -274,35 +293,55 @@ export function ClientDashboard() {
       }
       await loadClientData(token);
       setMessage("Disputa abierta. Un arbitro revisara el caso.");
+      setDisputeModalOpen(false);
+      setDisputeModalAppointment(null);
+      setDisputeModalReason("");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "No se pudo abrir la disputa.");
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
-  async function addDisputeEvidence(disputeId: number) {
+  function addDisputeEvidence(disputeId: number) {
     if (!token) {
       setMessage("Inicia sesion antes de aportar evidencia.");
       return;
     }
+    setEvidenceModalDisputeId(disputeId);
+    setEvidenceModalNote("");
+    setEvidenceModalOpen(true);
+  }
 
-    const note = window.prompt("Agrega una nota o evidencia textual para el arbitro.");
-    if (!note?.trim()) {
+  async function submitDisputeEvidence() {
+    if (!evidenceModalNote.trim()) {
+      setMessage("La evidencia no puede estar vacía.");
       return;
     }
 
+    if (evidenceModalDisputeId === null || !token) {
+      return;
+    }
+
+    setIsSubmitting(true);
     try {
-      const response = await fetch(`${API_URL}/disputes/${disputeId}/evidence/`, {
+      const response = await fetch(`${API_URL}/disputes/${evidenceModalDisputeId}/evidence/`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ note: note.trim() }),
+        body: JSON.stringify({ note: evidenceModalNote.trim() }),
       });
       if (!response.ok) {
         throw new Error("No se pudo agregar la evidencia.");
       }
       await loadClientData(token);
       setMessage("Evidencia agregada a la disputa.");
+      setEvidenceModalOpen(false);
+      setEvidenceModalDisputeId(null);
+      setEvidenceModalNote("");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "No se pudo agregar la evidencia.");
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -545,7 +584,7 @@ export function ClientDashboard() {
                                 onClick={() => void awardBid(auction.id, bid.id)}
                                 disabled={auction.status !== "open" || bid.status !== "pending"}
                               >
-                                Adjudicar
+                                Aceptar
                               </Button>
                             </div>
                           ))
@@ -755,6 +794,98 @@ export function ClientDashboard() {
               </CardContent>
             </Card>
           </section>
+
+        {/* Evidence Modal */}
+        {evidenceModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+            <div
+              className={`${surfaceClass} w-full max-w-md transform transition-all duration-200 ${
+                evidenceModalOpen ? "scale-100 opacity-100" : "scale-95 opacity-0"
+              }`}
+            >
+              <div className="space-y-4 p-6">
+                <h2 className="text-lg font-bold text-white">Agregar evidencia</h2>
+                <p className="text-sm text-purple-100">
+                  Escribe una nota o evidencia textual para el árbitro.
+                </p>
+                <Textarea
+                  value={evidenceModalNote}
+                  onChange={(e) => setEvidenceModalNote(e.target.value)}
+                  placeholder="Describe los detalles de tu evidencia..."
+                  className={fieldClass}
+                  rows={5}
+                />
+                <div className="flex gap-2">
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      setEvidenceModalOpen(false);
+                      setEvidenceModalDisputeId(null);
+                      setEvidenceModalNote("");
+                    }}
+                    className="flex-1 border border-white/10 text-purple-100 hover:bg-white/10 hover:text-white"
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    onClick={() => void submitDisputeEvidence()}
+                    disabled={isSubmitting || !evidenceModalNote.trim()}
+                    className="flex-1 bg-gradient-to-r from-orange-400 to-rose-500 font-semibold text-white hover:from-orange-500 hover:to-rose-600"
+                  >
+                    Enviar evidencia
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Dispute Modal */}
+        {disputeModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+            <div
+              className={`${surfaceClass} w-full max-w-md transform transition-all duration-200 ${
+                disputeModalOpen ? "scale-100 opacity-100" : "scale-95 opacity-0"
+              }`}
+            >
+              <div className="space-y-4 p-6">
+                <h2 className="text-lg font-bold text-white">Abrir disputa</h2>
+                <p className="text-sm text-purple-100">
+                  {disputeModalAppointment
+                    ? `Describe brevemente el problema con la cita #${disputeModalAppointment.id}.`
+                    : "Describe brevemente el problema con esta cita."}
+                </p>
+                <Textarea
+                  value={disputeModalReason}
+                  onChange={(e) => setDisputeModalReason(e.target.value)}
+                  placeholder="Explica qué ocurrió con el servicio..."
+                  className={fieldClass}
+                  rows={5}
+                />
+                <div className="flex gap-2">
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      setDisputeModalOpen(false);
+                      setDisputeModalAppointment(null);
+                      setDisputeModalReason("");
+                    }}
+                    className="flex-1 border border-white/10 text-purple-100 hover:bg-white/10 hover:text-white"
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    onClick={() => void submitAppointmentDispute()}
+                    disabled={isSubmitting || !disputeModalReason.trim()}
+                    className="flex-1 bg-gradient-to-r from-orange-400 to-rose-500 font-semibold text-white hover:from-orange-500 hover:to-rose-600"
+                  >
+                    Abrir disputa
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         </main>
       </div>
     </div>

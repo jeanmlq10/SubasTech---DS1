@@ -7,10 +7,12 @@ from .client import GeminiIntentClient
 logger = logging.getLogger(__name__)
 
 CATEGORY_KEYWORDS = {
-    "electricista": ["electricista", "luz", "corriente", "breaker", "enchufe", "corto", "electrico", "electrica"],
-    "plomero": ["plomero", "tuberia", "agua", "fuga", "bano", "lavaplatos", "grifo", "inodoro"],
-    "cerrajero": ["cerrajero", "cerradura", "llave", "puerta"],
-    "pintor": ["pintor", "pintura", "pintar", "pared"],
+    "electricista": ["electricista", "luz", "corriente", "breaker", "enchufe", "corto", "electrico", "electrica",
+                     "tomacorriente", "voltaje", "cable", "interruptor", "bombillo", "fusible"],
+    "plomero": ["plomero", "tuberia", "agua", "fuga", "bano", "lavaplatos", "grifo", "inodoro", "chorro", "cano",
+                "wc", "sanitario", "ducha", "gotea", "tuberia"],
+    "cerrajero": ["cerrajero", "cerradura", "llave", "puerta", "chapa", "candado", "seguro"],
+    "pintor": ["pintor", "pintura", "pintar", "pared", "fachada", "estuco", "barniz"],
 }
 URGENCY_KEYWORDS = ["urgente", "ya", "emergencia", "inmediato", "rapido", "hoy", "ahora"]
 GREETING_KEYWORDS = ["hola", "buenas", "buenos dias", "/start"]
@@ -34,6 +36,11 @@ def interpret_message(message: str, *, client: GeminiIntentClient | None = None)
     if deterministic is not None:
         return deterministic
 
+    rules_result = rules_fallback(message)
+    if rules_result["categoria"] is not None and rules_result["accion"] != "otro":
+        rules_result["confidence"] = 0.80
+        return rules_result
+
     llm_client = client or GeminiIntentClient()
     try:
         payload = llm_client.interpret(message)
@@ -43,7 +50,7 @@ def interpret_message(message: str, *, client: GeminiIntentClient | None = None)
             logger.error("🚨 GEMINI QUOTA EXHAUSTED - Replace API key in .env [GEMINI_API_KEY]")
         else:
             logger.warning("LLM provider failed, using rules fallback: %s", exc)
-        return rules_fallback(message)
+        return rules_result
 
 
 def deterministic_intent(message: str) -> dict | None:

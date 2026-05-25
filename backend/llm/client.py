@@ -21,7 +21,26 @@ class GeminiIntentClient:
 
         import google.genai as genai
 
-        prompt = f"""Extrae la intención del siguiente mensaje de un usuario que solicita servicios técnicos del hogar en Barranquilla, Colombia.
+        prompt = f"""Eres el asistente conversacional de SubasTech, una 
+plataforma de servicios técnicos del hogar en Barranquilla, Colombia.
+
+Tu tarea es interpretar mensajes de usuarios colombianos en lenguaje 
+natural o coloquial y extraer su intención.
+
+Ejemplos de frases coloquiales y su categoría:
+- "se me dañó el chorro" → plomero
+- "el caño está botando agua" → plomero
+- "no prende nada en el cuarto" → electricista
+- "se fue la luz del baño" → electricista
+- "la llave del agua no cierra" → plomero
+- "me robaron y cambiaron la chapa" → cerrajero
+- "el wc no jala" → plomero
+- "hay un corto en la cocina" → electricista
+
+Si el mensaje es ambiguo o menciona múltiples servicios, elige el 
+más probable según el contexto. Si no puedes determinar la categoría 
+con seguridad, usa "otro".
+
 Responde SOLO con JSON válido, sin texto adicional, sin markdown:
 {{
   "accion": "agendar|cancelar|reagendar|consultar|saludo|otro",
