@@ -397,6 +397,27 @@ def handle_conversation(session: ChatSession, text: str, intent: dict) -> str:
     lowered = cleaned_text.lower()
     accion = (intent.get("accion") or "").lower()
 
+    if accion == "otro" or intent.get("confidence", 1.0) < 0.5:
+        categorias_detectadas = []
+        text_norm = normalize_text(cleaned_text)
+        from llm.services import CATEGORY_KEYWORDS, normalize_text
+
+        for slug, keywords in CATEGORY_KEYWORDS.items():
+            if any(kw in text_norm for kw in keywords):
+                categorias_detectadas.append(slug)
+
+        if len(categorias_detectadas) > 1:
+            nombres = " o ".join([c.capitalize() for c in categorias_detectadas])
+            return f"Entiendo que necesitas ayuda, pero solo puedo gestionar un servicio a la vez. ¿Qué necesitas primero, {nombres}?"
+
+        if accion == "otro" and not categorias_detectadas:
+            return (
+                "No entendi bien tu solicitud. Puedes decirme por ejemplo:\n"
+                "- Necesito un electricista en Riomar\n"
+                "- Se me daño el chorro del bano\n"
+                "- Quiero cancelar mi cita"
+            )
+
     if cleaned_text in CATEGORY_CHOICES and step in {"initial", "waiting_category"}:
         intent = {"accion": "agendar", "categoria": CATEGORY_CHOICES[cleaned_text], "zona": None}
         accion = "agendar"
