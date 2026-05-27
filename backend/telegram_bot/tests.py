@@ -1,4 +1,5 @@
 from datetime import datetime, time, timedelta
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
@@ -111,6 +112,14 @@ class TelegramBotTests(TestCase):
         self.assertEqual(zone_response.json()["step"], "waiting_technician_selection")
         self.assertIn("Tecnicos disponibles", zone_response.json()["reply"])
 
+    def test_typo_zone_is_resolved_to_riomar(self):
+        response = self._send_message("Necesito un electricista en riomas")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["step"], "waiting_technician_selection")
+        self.assertIn("Tecnicos disponibles", response.json()["reply"])
+        self.assertIn("Carlos Mendoza", response.json()["reply"])
+
     def test_numeric_text_is_not_accepted_as_neighborhood(self):
         first_response = self._send_message("Necesito un electricista")
         self.assertEqual(first_response.json()["step"], "waiting_zone")
@@ -121,6 +130,47 @@ class TelegramBotTests(TestCase):
         self.assertEqual(zone_response.json()["step"], "waiting_zone")
         self.assertIn("No encontre ese barrio", zone_response.json()["reply"])
         self.assertNotIn("Alto Prado", zone_response.json()["reply"])
+
+    @patch("llm.client.GeminiIntentClient.interpret")
+    def test_zone_typo_is_recovered_with_llm_fallback(self, mock_interpret):
+        mock_interpret.return_value = {
+            "accion": "agendar",
+            "categoria": None,
+            "urgencia": "baja",
+            "zona": "riomar",
+            "confidence": 0.92,
+        }
+
+        first_response = self._send_message("Necesito un electricista")
+        self.assertEqual(first_response.json()["step"], "waiting_zone")
+
+        zone_response = self._send_message("rioma")
+
+        self.assertEqual(zone_response.status_code, 200)
+        self.assertEqual(zone_response.json()["step"], "waiting_technician_selection")
+        self.assertIn("Tecnicos disponibles", zone_response.json()["reply"])
+
+    def test_affirmative_response_at_technician_selection_creates_auction(self):
+        first_response = self._send_message("Necesito un electricista en Riomar")
+        self.assertEqual(first_response.json()["step"], "waiting_technician_selection")
+
+        auction_response = self._send_message("sí")
+
+        self.assertEqual(auction_response.status_code, 200)
+        self.assertEqual(auction_response.json()["step"], "initial")
+        self.assertEqual(Auction.objects.count(), 1)
+        self.assertIn("Subasta creada", auction_response.json()["reply"])
+
+    def test_negative_auction_phrase_does_not_create_auction(self):
+        first_response = self._send_message("Necesito un electricista en Riomar")
+        self.assertEqual(first_response.json()["step"], "waiting_technician_selection")
+
+        no_auction_response = self._send_message("no quiero hacer la subasta")
+
+        self.assertEqual(no_auction_response.status_code, 200)
+        self.assertEqual(no_auction_response.json()["step"], "waiting_technician_selection")
+        self.assertEqual(Auction.objects.count(), 0)
+        self.assertIn("Responde con un numero entre 1", no_auction_response.json()["reply"])
 
     def test_reset_command_returns_to_start_from_any_step(self):
         first_response = self._send_message("Necesito un electricista")
@@ -143,6 +193,17 @@ class TelegramBotTests(TestCase):
         self.assertEqual(reset_response.status_code, 200)
         self.assertEqual(reset_response.json()["step"], "initial")
         self.assertIn("Hola, soy el asistente de SubasTech.", reset_response.json()["reply"])
+
+    def test_invalid_technician_selection_falls_back_to_llm_intent(self):
+        self._create_appointment(9, 10)
+        first_response = self._send_message("Necesito un electricista en Riomar")
+        self.assertEqual(first_response.json()["step"], "waiting_technician_selection")
+
+        cancel_response = self._send_message("Quiero cancelar mi cita")
+
+        self.assertEqual(cancel_response.status_code, 200)
+        self.assertEqual(cancel_response.json()["step"], "waiting_cancel_confirm")
+        self.assertIn("Confirmas la cancelacion", cancel_response.json()["reply"])
 
     def test_history_persists_full_conversation(self):
         self._send_message("hola")

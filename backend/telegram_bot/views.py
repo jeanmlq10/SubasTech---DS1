@@ -1,3 +1,4 @@
+import difflib
 import json
 import logging
 import re
@@ -38,6 +39,7 @@ from notifications.services import build_telegram_message_payload, create_notifi
 from recommendations.services import RecommendationRequest, recommend_services
 
 from .ai import extract_intent
+from llm.services import normalize_text
 from .client import TelegramBotClient
 from .models import ChatSession, ConversationMessage
 
@@ -217,6 +219,40 @@ def _with_navigation_hint(message: str) -> str:
     if RESET_HINT in message:
         return message
     return f"{message}\n\n{RESET_HINT}"
+
+
+def _is_negative_auction_request(text: str) -> bool:
+    cleaned = normalize_text(text)
+    return any(phrase in cleaned for phrase in ("no quiero", "no quiero hacer", "no quiero recibir", "no quiero que", "no deseo", "no deseo hacer", "no deseo recibir", "no gracias", "no me interesa", "no quiero la subasta", "no quiero subasta"))
+
+
+def _is_auction_request(text: str) -> bool:
+    cleaned = normalize_text(text)
+    if _is_negative_auction_request(cleaned):
+        return False
+    for choice in AUCTION_CHOICES:
+        if choice in cleaned:
+            return True
+    return False
+
+
+def _fallback_to_llm_for_step(session: ChatSession, text: str, default_response: str) -> str:
+    intent = extract_intent(text)
+    if intent.get("confidence", 0.0) < 0.5 or intent.get("accion") == "otro":
+        return default_response
+
+    action = intent.get("accion")
+    if action == "saludo":
+        _reset_session(session)
+        return _build_welcome_message()
+    if action == "cancelar":
+        return _start_cancel_flow(session)
+    if action == "reagendar":
+        return _start_reschedule_flow(session)
+    if action == "agendar":
+        return _start_booking_flow(session, text, intent)
+
+    return default_response
 
 
 def _process_chat_message(
@@ -522,11 +558,18 @@ def _start_booking_flow(session: ChatSession, text: str, intent: dict) -> str:
 
 def _handle_zone_selection(session: ChatSession, text: str, state: dict) -> str:
     selected_zone = _resolve_zone_text(text)
+    if not selected_zone:
+        intent = extract_intent(text)
+        selected_zone = _resolve_zone_text(intent.get("zona"))
 
     if not selected_zone:
-        return (
-            "No encontre ese barrio en nuestra cobertura.\n"
-            "Escribelo de nuevo sin direccion completa, por ejemplo: Riomar, Boston, El Prado, Villa Santos o La Pradera."
+        return _fallback_to_llm_for_step(
+            session,
+            text,
+            (
+                "No encontre ese barrio en nuestra cobertura.\n"
+                "Escribelo de nuevo sin direccion completa, por ejemplo: Riomar, Boston, El Prado, Villa Santos o La Pradera."
+            ),
         )
 
     category = state.get("categoria")
@@ -552,12 +595,19 @@ def _handle_zone_selection(session: ChatSession, text: str, state: dict) -> str:
 
 def _handle_technician_selection(session: ChatSession, text: str, state: dict) -> str:
     recommendations = state.get("recommendations") or []
-    if text.strip().lower() in AUCTION_CHOICES:
+    if _is_auction_request(text):
+        return _start_auction_flow(session, state)
+
+    if text.strip().lower() in YES_CHOICES:
         return _start_auction_flow(session, state)
 
     selected_index = _parse_numeric_choice(text, len(recommendations))
     if selected_index is None:
-        return f"Responde con un numero entre 1 y {len(recommendations)} para escoger tecnico, o 0 para recibir ofertas."
+        return _fallback_to_llm_for_step(
+            session,
+            text,
+            f"Responde con un numero entre 1 y {len(recommendations)} para escoger tecnico, o 0 para recibir ofertas.",
+        )
 
     selected = recommendations[selected_index]
     technician = TechnicianProfile.objects.filter(pk=selected["technician_id"]).first()
@@ -596,7 +646,11 @@ def _handle_slot_booking(session: ChatSession, text: str, state: dict) -> str:
     slots = state.get("slots") or []
     selected_index = _parse_numeric_choice(text, len(slots))
     if selected_index is None:
-        return f"Responde con un numero entre 1 y {len(slots)} para escoger horario."
+        return _fallback_to_llm_for_step(
+            session,
+            text,
+            f"Responde con un numero entre 1 y {len(slots)} para escoger horario.",
+        )
 
     booking_state = dict(state)
     booking_state["selected_slot"] = slots[selected_index]
@@ -622,7 +676,7 @@ def _handle_contact_collection(session: ChatSession, text: str, state: dict, ste
     try:
         cleaned_value = _validate_contact_field(field_name, text)
     except ValueError as exc:
-        return str(exc)
+        return _fallback_to_llm_for_step(session, text, str(exc))
 
     updated_state = dict(state)
     client_draft = dict(updated_state.get("client_draft") or {})
@@ -661,7 +715,7 @@ def _start_auction_flow(session: ChatSession, state: dict) -> str:
 
 def _handle_auction_name(session: ChatSession, text: str, state: dict) -> str:
     if len(text.strip().split()) < 2:
-        return "Necesito tu nombre y apellido para continuar."
+        return _fallback_to_llm_for_step(session, text, "Necesito tu nombre y apellido para continuar.")
     if session.user:
         first_name, last_name = text.strip().split(" ", 1)
         session.user.first_name = first_name
@@ -686,7 +740,11 @@ def _handle_auction_name(session: ChatSession, text: str, state: dict) -> str:
 def _handle_auction_phone(session: ChatSession, text: str, state: dict) -> str:
     digits = re.sub(r"\D", "", text.strip())
     if len(digits) < 10 or len(digits) > 15:
-        return "Comparte un numero de celular valido, por ejemplo 3001234567 o 573001234567."
+        return _fallback_to_llm_for_step(
+            session,
+            text,
+            "Comparte un numero de celular valido, por ejemplo 3001234567 o 573001234567.",
+        )
     if session.user:
         session.user.phone_number = digits
         session.user.save(update_fields=["phone_number"])
@@ -704,7 +762,11 @@ def _handle_auction_phone(session: ChatSession, text: str, state: dict) -> str:
 
 def _handle_auction_address(session: ChatSession, text: str, state: dict) -> str:
     if len(text.strip()) < 8:
-        return "Comparte una direccion mas completa, por ejemplo: Cra 50 #80-45 Riomar o Calle 84 frente al parque."
+        return _fallback_to_llm_for_step(
+            session,
+            text,
+            "Comparte una direccion mas completa, por ejemplo: Cra 50 #80-45 Riomar o Calle 84 frente al parque.",
+        )
     updated_state = dict(state)
     updated_state["auction_address"] = text.strip()
     if session.user:
@@ -1410,6 +1472,18 @@ def _resolve_zone_text(value: str | None) -> str | None:
     zone = Zone.objects.filter(name__icontains=cleaned, is_active=True).first()
     if zone is not None:
         return zone.slug
+
+    # Fuzzy match common zone typos, e.g. riomas -> riomar.
+    normalized = cleaned.lower()
+    candidates = {}
+    for zone_slug, keywords in ZONE_KEYWORDS.items():
+        candidates[zone_slug] = zone_slug
+        for keyword in keywords:
+            candidates[keyword] = zone_slug
+
+    close_matches = difflib.get_close_matches(normalized, candidates.keys(), n=1, cutoff=0.75)
+    if close_matches:
+        return candidates[close_matches[0]]
 
     return None
 
