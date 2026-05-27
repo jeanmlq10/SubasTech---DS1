@@ -5,8 +5,10 @@ from .models import ServiceLead
 
 class ServiceLeadSerializer(serializers.ModelSerializer):
     technician_name = serializers.SerializerMethodField()
-    service_title = serializers.CharField(source="service.title", read_only=True)
-    client_username = serializers.CharField(source="client_user.username", read_only=True)
+    service_title = serializers.CharField(
+        source="service.title", read_only=True)
+    client_username = serializers.CharField(
+        source="client_user.username", read_only=True)
     appointment = serializers.SerializerMethodField()
 
     class Meta:
@@ -62,7 +64,7 @@ class ServiceLeadSerializer(serializers.ModelSerializer):
             "status": appointment.status,
             "technician_status": metadata.get("technician_status") or "",
             "service_title": appointment.service.title if appointment.service_id else (obj.service.title if obj.service_id else ""),
-            "client_username": appointment.client.username,
+            "client_name": appointment.client.get_full_name() or appointment.client.username,
             "client_address": metadata.get("client_address") or getattr(appointment.client, "address", ""),
             "request_text": metadata.get("request_text") or obj.message,
             "location": metadata.get("location") or obj.location,

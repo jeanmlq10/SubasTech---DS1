@@ -45,15 +45,16 @@ class AppointmentSerializer(serializers.ModelSerializer):
     """
 
     technician_name = serializers.SerializerMethodField()
-    client_username = serializers.CharField(source="client.username", read_only=True)
-    service_title = serializers.CharField(source="service.title", read_only=True)
+    client_name = serializers.SerializerMethodField()
+    service_title = serializers.CharField(
+        source="service.title", read_only=True)
 
     class Meta:
         model = Appointment
         fields = [
             "id",
             "client",
-            "client_username",
+            "client_name",
             "technician",
             "technician_name",
             "service",
@@ -73,6 +74,9 @@ class AppointmentSerializer(serializers.ModelSerializer):
 
     def get_technician_name(self, obj):
         return obj.technician.user.get_full_name() or obj.technician.user.username
+
+    def get_client_name(self, obj):
+        return obj.client.get_full_name() or obj.client.username
 
 
 # ---------------------------------------------------------------------------
@@ -222,7 +226,8 @@ class AppointmentNoShowSerializer(serializers.Serializer):
     non-empty).
     """
 
-    reason = serializers.CharField(required=False, allow_blank=True, default="")
+    reason = serializers.CharField(
+        required=False, allow_blank=True, default="")
 
     def validate_reason(self, value):
         return value.strip() if isinstance(value, str) else value
@@ -230,8 +235,10 @@ class AppointmentNoShowSerializer(serializers.Serializer):
 
 class AvailableSlotsQuerySerializer(serializers.Serializer):
     start_date = serializers.DateField(required=False)
-    days = serializers.IntegerField(required=False, min_value=1, max_value=14, default=7)
-    slot_minutes = serializers.IntegerField(required=False, min_value=15, max_value=240, default=60)
+    days = serializers.IntegerField(
+        required=False, min_value=1, max_value=14, default=7)
+    slot_minutes = serializers.IntegerField(
+        required=False, min_value=15, max_value=240, default=60)
     service_id = serializers.PrimaryKeyRelatedField(
         source="service",
         queryset=Service.objects.all(),

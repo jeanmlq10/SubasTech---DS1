@@ -51,6 +51,7 @@ DEFAULT_SLOT_DAYS = 7
 DEFAULT_SLOT_COUNT = 5
 DEFAULT_CANCELLATION_REASON = "Cancelled from Telegram chat"
 DEFAULT_RESCHEDULE_REASON = "Rescheduled from Telegram chat"
+DEFAULT_AUTOMATIC_USER_PASSWORD = "cuentausuario"
 CONTACT_FIELD_SEQUENCE = ("full_name", "phone_number", "email", "address")
 
 CATEGORY_CHOICES = {
@@ -83,8 +84,10 @@ ZONE_KEYWORDS = {
 }
 YES_CHOICES = {"si", "s", "confirmo", "yes"}
 NO_CHOICES = {"no", "n"}
-AUCTION_CHOICES = {"0", "ofertas", "oferta", "subasta", "recibir ofertas", "quiero ofertas"}
-RESET_CHOICES = {"inicio", "menu", "menú", "volver", "reiniciar", "empezar", "cancelar flujo"}
+AUCTION_CHOICES = {"0", "ofertas", "oferta",
+                   "subasta", "recibir ofertas", "quiero ofertas"}
+RESET_CHOICES = {"inicio", "menu", "menú", "volver",
+                 "reiniciar", "empezar", "cancelar flujo"}
 RESET_HINT = "Escribe INICIO para volver al principio."
 CONTACT_PROMPTS = {
     "full_name": "Antes de confirmar tu cita, necesito algunos datos 📋\n¿Cuál es tu nombre completo?",
@@ -103,7 +106,8 @@ CONTACT_STEP_BY_FIELD = {
 def _get_session(chat_id: int) -> ChatSession:
     session, _created = ChatSession.objects.get_or_create(chat_id=chat_id)
     if session.user_id is None:
-        linked_user = User.objects.filter(telegram_chat_id=str(chat_id)).first()
+        linked_user = User.objects.filter(
+            telegram_chat_id=str(chat_id)).first()
         if linked_user is not None:
             session.user = linked_user
             session.save(update_fields=["user", "updated_at"])
@@ -158,7 +162,7 @@ def _handle_rating_submission(session: ChatSession, text: str, state: dict) -> s
     appointment_id = state.get("awaiting_rating_for")
     if not appointment_id:
         _reset_session(session)
-        return "No encuentro la solicitud asociada a esta calificacion. Intenta de nuevo desde el dashboard o solicita el enlace." 
+        return "No encuentro la solicitud asociada a esta calificacion. Intenta de nuevo desde el dashboard o solicita el enlace."
 
     if session.user is None:
         return (
@@ -171,7 +175,8 @@ def _handle_rating_submission(session: ChatSession, text: str, state: dict) -> s
         from reputation.models import Rating
         from reputation.services import refresh_technician_reputation
 
-        appointment = Appointment.objects.select_related("technician", "service", "lead").filter(pk=appointment_id).first()
+        appointment = Appointment.objects.select_related(
+            "technician", "service", "lead").filter(pk=appointment_id).first()
         if not appointment:
             _reset_session(session)
             return "No se encontro la cita. Verifica e intenta nuevamente."
@@ -190,7 +195,8 @@ def _handle_rating_submission(session: ChatSession, text: str, state: dict) -> s
         try:
             refresh_technician_reputation(appointment.technician)
         except Exception:
-            logger.exception("Failed to refresh reputation for technician %s", appointment.technician_id)
+            logger.exception(
+                "Failed to refresh reputation for technician %s", appointment.technician_id)
 
         _reset_session(session)
         if comment:
@@ -275,11 +281,13 @@ def _process_chat_message(
 
         intent = extract_intent(text)
         _save_inbound(session, text, intent)
-        reply = _with_navigation_hint(handle_conversation(session, text, intent))
+        reply = _with_navigation_hint(
+            handle_conversation(session, text, intent))
         _save_outbound(session, reply)
         if telegram_message_id is not None:
             session.last_telegram_message_id = telegram_message_id
-            session.save(update_fields=["last_telegram_message_id", "updated_at"])
+            session.save(update_fields=[
+                         "last_telegram_message_id", "updated_at"])
         log_audit_event(
             event_type=AuditEvent.EventType.MESSAGE_SENT,
             actor=session.user,
@@ -366,7 +374,8 @@ def chatbot_message(request):
     except (TypeError, ValueError):
         return Response({"detail": "chat_id must be an integer"}, status=status.HTTP_400_BAD_REQUEST)
 
-    session, intent, reply, _processed = _process_chat_message(chat_id, text, user=request.user)
+    session, intent, reply, _processed = _process_chat_message(
+        chat_id, text, user=request.user)
     return Response({"reply": reply, "intent": intent, "step": session.current_step})
 
 
@@ -411,14 +420,18 @@ def chatbot_link_user(request):
     session = _get_session(chat_id)
     previous_user = session.user
     if previous_user is not None and previous_user.id != request.user.id:
-        Auction.objects.filter(client=previous_user).update(client=request.user)
-        Appointment.objects.filter(client=previous_user).update(client=request.user)
-        ServiceLead.objects.filter(client_user=previous_user).update(client_user=request.user)
+        Auction.objects.filter(client=previous_user).update(
+            client=request.user)
+        Appointment.objects.filter(
+            client=previous_user).update(client=request.user)
+        ServiceLead.objects.filter(client_user=previous_user).update(
+            client_user=request.user)
         if previous_user.telegram_chat_id == str(chat_id):
             previous_user.telegram_chat_id = None
             previous_user.save(update_fields=["telegram_chat_id"])
 
-    User.objects.filter(telegram_chat_id=str(chat_id)).exclude(pk=request.user.pk).update(telegram_chat_id=None)
+    User.objects.filter(telegram_chat_id=str(chat_id)).exclude(
+        pk=request.user.pk).update(telegram_chat_id=None)
     request.user.telegram_chat_id = str(chat_id)
     request.user.save(update_fields=["telegram_chat_id"])
     session.user = request.user
@@ -434,7 +447,8 @@ def handle_conversation(session: ChatSession, text: str, intent: dict) -> str:
     accion = (intent.get("accion") or "").lower()
 
     if cleaned_text in CATEGORY_CHOICES and step in {"initial", "waiting_category"}:
-        intent = {"accion": "agendar", "categoria": CATEGORY_CHOICES[cleaned_text], "zona": None}
+        intent = {"accion": "agendar",
+                  "categoria": CATEGORY_CHOICES[cleaned_text], "zona": None}
         accion = "agendar"
 
     if lowered in RESET_CHOICES:
@@ -460,6 +474,8 @@ def handle_conversation(session: ChatSession, text: str, intent: dict) -> str:
         return _handle_technician_selection(session, cleaned_text, state)
     if step == "waiting_auction_name":
         return _handle_auction_name(session, cleaned_text, state)
+    if step == "waiting_auction_email":
+        return _handle_auction_email(session, cleaned_text, state)
     if step == "waiting_auction_phone":
         return _handle_auction_phone(session, cleaned_text, state)
     if step == "waiting_auction_address":
@@ -490,7 +506,8 @@ def handle_conversation(session: ChatSession, text: str, intent: dict) -> str:
                 categorias_detectadas.append(slug)
 
         if len(categorias_detectadas) > 1:
-            nombres = " o ".join([c.capitalize() for c in categorias_detectadas])
+            nombres = " o ".join([c.capitalize()
+                                 for c in categorias_detectadas])
             return f"Entiendo que necesitas ayuda, pero solo puedo gestionar un servicio a la vez. ¿Qué necesitas primero, {nombres}?"
 
         if accion == "otro" or intent.get("confidence", 1.0) < 0.5:
@@ -610,7 +627,8 @@ def _handle_technician_selection(session: ChatSession, text: str, state: dict) -
         )
 
     selected = recommendations[selected_index]
-    technician = TechnicianProfile.objects.filter(pk=selected["technician_id"]).first()
+    technician = TechnicianProfile.objects.filter(
+        pk=selected["technician_id"]).first()
 
     service = Service.objects.filter(pk=selected["service_id"]).first()
     if technician is None or service is None:
@@ -685,7 +703,8 @@ def _handle_contact_collection(session: ChatSession, text: str, state: dict, ste
 
     next_field = _next_missing_contact_field(session.user, updated_state)
     if next_field is not None:
-        _update_session(session, step=CONTACT_STEP_BY_FIELD[next_field], state_data=updated_state)
+        _update_session(
+            session, step=CONTACT_STEP_BY_FIELD[next_field], state_data=updated_state)
         return CONTACT_PROMPTS[next_field]
 
     return _finalize_booking(session, updated_state)
@@ -693,23 +712,27 @@ def _handle_contact_collection(session: ChatSession, text: str, state: dict, ste
 
 def _start_auction_flow(session: ChatSession, state: dict) -> str:
     user = session.user
-    user_name = (getattr(user, "first_name", "") or "").strip() if user else ""
-    if not user_name:
+    user_email = (getattr(user, "email", "") or "").strip() if user else ""
+    draft = dict(state.get("client_draft") or {})
+    if not user_email and not draft.get("email"):
+        _update_session(session, step="waiting_auction_email",
+                        state_data=state)
+        return "Para crear tu cuenta y continuar necesito tu correo electrónico."
+
+    if not draft.get("full_name"):
         _update_session(session, step="waiting_auction_name", state_data=state)
         return "Antes de crear la subasta, necesito tu nombre completo."
-    user_phone = (getattr(user, "phone_number", "") or "").strip() if user else ""
-    if not user_phone:
-        _update_session(session, step="waiting_auction_phone", state_data=state)
-        return "Cual es tu numero de celular?"
-    user_address = (getattr(user, "address", "") or "").strip() if user else ""
-    if not user_address:
-        _update_session(session, step="waiting_auction_address", state_data=state)
+
+    if not draft.get("address"):
+        _update_session(
+            session, step="waiting_auction_address", state_data=state)
         return (
             "Para que el tecnico pueda llegar, necesito la direccion del servicio.\n"
             "Escribeme la calle, barrio o una referencia clara, por ejemplo: Cra 50 #80-45 Riomar."
         )
+
     updated_state = dict(state)
-    updated_state["auction_address"] = user_address
+    updated_state["auction_address"] = draft.get("address")
     return _create_auction_from_chat(session, updated_state)
 
 
@@ -721,20 +744,33 @@ def _handle_auction_name(session: ChatSession, text: str, state: dict) -> str:
         session.user.first_name = first_name
         session.user.last_name = last_name
         session.user.save(update_fields=["first_name", "last_name"])
-    user_phone = (getattr(session.user, "phone_number", "") or "").strip() if session.user else ""
-    if not user_phone:
-        _update_session(session, step="waiting_auction_phone", state_data=state)
-        return "Cual es tu numero de celular?"
-    user_address = (getattr(session.user, "address", "") or "").strip() if session.user else ""
-    if not user_address:
-        _update_session(session, step="waiting_auction_address", state_data=state)
+    draft_address = (state.get("client_draft") or {}).get("address")
+    if not draft_address:
+        _update_session(
+            session, step="waiting_auction_address", state_data=state)
         return (
             "Para que el tecnico pueda llegar, necesito la direccion del servicio.\n"
             "Escribeme la calle, barrio o una referencia clara, por ejemplo: Cra 50 #80-45 Riomar."
         )
     updated_state = dict(state)
-    updated_state["auction_address"] = user_address
+    updated_state["auction_address"] = draft_address
     return _create_auction_from_chat(session, updated_state)
+
+
+def _handle_auction_email(session: ChatSession, text: str, state: dict) -> str:
+    try:
+        email = _validate_contact_field("email", text)
+    except ValueError as exc:
+        return _fallback_to_llm_for_step(
+            session,
+            text,
+            "Por favor escribe un correo electrónico válido para continuar.",
+        )
+    updated_state = dict(state)
+    client_draft = dict(updated_state.get("client_draft") or {})
+    client_draft["email"] = email
+    updated_state["client_draft"] = client_draft
+    return _start_auction_flow(session, updated_state)
 
 
 def _handle_auction_phone(session: ChatSession, text: str, state: dict) -> str:
@@ -748,15 +784,16 @@ def _handle_auction_phone(session: ChatSession, text: str, state: dict) -> str:
     if session.user:
         session.user.phone_number = digits
         session.user.save(update_fields=["phone_number"])
-    user_address = (getattr(session.user, "address", "") or "").strip() if session.user else ""
-    if not user_address:
-        _update_session(session, step="waiting_auction_address", state_data=state)
+    draft_address = (state.get("client_draft") or {}).get("address")
+    if not draft_address:
+        _update_session(
+            session, step="waiting_auction_address", state_data=state)
         return (
             "Para que el tecnico pueda llegar, necesito la direccion del servicio.\n"
             "Escribeme la calle, barrio o una referencia clara, por ejemplo: Cra 50 #80-45 Riomar."
         )
     updated_state = dict(state)
-    updated_state["auction_address"] = user_address
+    updated_state["auction_address"] = draft_address
     return _create_auction_from_chat(session, updated_state)
 
 
@@ -818,15 +855,18 @@ def _create_auction_from_chat(session: ChatSession, state: dict) -> str:
             status=Auction.Status.OPEN,
             metadata__chat_id=session.chat_id,
         )
-        Bid.objects.filter(auction__in=previous_auctions, status=Bid.Status.PENDING).update(status=Bid.Status.REJECTED)
+        Bid.objects.filter(auction__in=previous_auctions, status=Bid.Status.PENDING).update(
+            status=Bid.Status.REJECTED)
         previous_auctions.update(status=Auction.Status.CANCELLED)
         auction = Auction.objects.create(
             client=session.user,
             category=category,
             zone=zone,
             title=f"Solicitud de {CATEGORY_DISPLAY_NAMES.get(state.get('categoria'), category.name)}",
-            description=state.get("request_text") or f"Solicitud desde Telegram para {category.name}",
-            location=ZONE_DISPLAY_NAMES.get(state.get("zona"), state.get("zona") or ""),
+            description=state.get(
+                "request_text") or f"Solicitud desde Telegram para {category.name}",
+            location=ZONE_DISPLAY_NAMES.get(
+                state.get("zona"), state.get("zona") or ""),
             urgency="normal",
             source=Auction.Source.TELEGRAM,
             expires_at=expires_at,
@@ -852,7 +892,8 @@ def _create_auction_from_chat(session: ChatSession, state: dict) -> str:
         entity_id=str(auction.id),
         status="success",
         message="Auction created from Telegram chatbot",
-        metadata={"category_id": category.id, "zone_id": zone.id if zone else None},
+        metadata={"category_id": category.id,
+                  "zone_id": zone.id if zone else None},
     )
     _reset_session(session)
     duration_minutes = settings.AUCTION_DURATION_MINUTES
@@ -873,7 +914,8 @@ def _is_bid_acceptance(text: str) -> bool:
 
 
 def _handle_bid_acceptance(session: ChatSession, text: str) -> str:
-    match = re.match(r"^\s*acepto\s*:\s*(?P<name>.+?)\s*$", text, flags=re.IGNORECASE)
+    match = re.match(r"^\s*acepto\s*:\s*(?P<name>.+?)\s*$",
+                     text, flags=re.IGNORECASE)
     technician_text = match.group("name") if match else ""
     auction = (
         Auction.objects.select_related("client", "category", "zone")
@@ -894,9 +936,11 @@ def _handle_bid_acceptance(session: ChatSession, text: str) -> str:
         .filter(auction=auction, status=Bid.Status.PENDING)
         .order_by("created_at")
     )
-    matching_bids = [bid for bid in pending_bids if _technician_name_matches(bid, technician_text)]
+    matching_bids = [
+        bid for bid in pending_bids if _technician_name_matches(bid, technician_text)]
     if not matching_bids:
-        available_names = ", ".join(_bid_technician_name(bid) for bid in pending_bids) or "sin ofertas pendientes"
+        available_names = ", ".join(_bid_technician_name(
+            bid) for bid in pending_bids) or "sin ofertas pendientes"
         return (
             f"No encontre una oferta pendiente de '{technician_text}' para la subasta #{auction.id}.\n"
             f"Ofertas disponibles: {available_names}.\n\n"
@@ -951,9 +995,11 @@ def _meaningful_request_text(text: str, category: str | None, zone: str | None) 
     the resolved category and zone instead.
     """
     cleaned = (text or "").strip()
-    is_trivial = not cleaned or cleaned.isdigit() or (len(cleaned.split()) == 1 and len(cleaned) <= 20)
+    is_trivial = not cleaned or cleaned.isdigit() or (
+        len(cleaned.split()) == 1 and len(cleaned) <= 20)
     if is_trivial:
-        category_name = CATEGORY_DISPLAY_NAMES.get(category or "", category or "Servicio tecnico")
+        category_name = CATEGORY_DISPLAY_NAMES.get(
+            category or "", category or "Servicio tecnico")
         zone_name = ZONE_DISPLAY_NAMES.get(zone or "", zone or "")
         return f"Solicitud de {category_name}" + (f" en {zone_name}" if zone_name else "")
     return cleaned
@@ -992,7 +1038,8 @@ def _start_cancel_flow(session: ChatSession) -> str:
         _update_session(
             session,
             step="waiting_cancel_target",
-            state_data={"appointment_id": appointment.id, "auction_id": auction.id},
+            state_data={"appointment_id": appointment.id,
+                        "auction_id": auction.id},
         )
         return (
             "Tienes dos cosas activas. Que quieres cancelar?\n\n"
@@ -1004,7 +1051,8 @@ def _start_cancel_flow(session: ChatSession) -> str:
         _update_session(
             session,
             step="waiting_cancel_confirm",
-            state_data={"appointment_id": appointment.id, "cancel_target": "appointment"},
+            state_data={"appointment_id": appointment.id,
+                        "cancel_target": "appointment"},
         )
         return f"Encontre esta cita activa:\n{_format_appointment_summary(appointment)}\n\nConfirmas la cancelacion? Responde SI o NO."
     if auction:
@@ -1030,12 +1078,14 @@ def _handle_cancel_target(session: ChatSession, text: str, state: dict) -> str:
         _update_session(
             session,
             step="waiting_cancel_confirm",
-            state_data={"appointment_id": appointment_id, "cancel_target": "appointment"},
+            state_data={"appointment_id": appointment_id,
+                        "cancel_target": "appointment"},
         )
         return f"Confirmas la cancelacion de esta cita?\n{_format_appointment_summary(appointment)}\n\nResponde SI o NO."
     if text.strip() == "2":
         auction_id = state.get("auction_id")
-        auction = Auction.objects.filter(pk=auction_id, status=Auction.Status.OPEN).first()
+        auction = Auction.objects.filter(
+            pk=auction_id, status=Auction.Status.OPEN).first()
         if auction is None:
             _reset_session(session)
             return "No encontre esa subasta abierta."
@@ -1058,12 +1108,14 @@ def _handle_cancel_confirmation(session: ChatSession, lowered_text: str, state: 
     cancel_target = state.get("cancel_target", "appointment")
 
     if cancel_target == "auction":
-        auction = Auction.objects.filter(pk=state.get("auction_id"), status=Auction.Status.OPEN).first()
+        auction = Auction.objects.filter(pk=state.get(
+            "auction_id"), status=Auction.Status.OPEN).first()
         if auction is None:
             _reset_session(session)
             return "Ya no encontré esa subasta abierta para cancelar."
         with transaction.atomic():
-            Bid.objects.filter(auction=auction, status=Bid.Status.PENDING).update(status=Bid.Status.REJECTED)
+            Bid.objects.filter(auction=auction, status=Bid.Status.PENDING).update(
+                status=Bid.Status.REJECTED)
             auction.status = Auction.Status.CANCELLED
             auction.save(update_fields=["status", "updated_at"])
         _reset_session(session)
@@ -1073,7 +1125,8 @@ def _handle_cancel_confirmation(session: ChatSession, lowered_text: str, state: 
     if appointment is None:
         _reset_session(session)
         return "Ya no encontré esa cita activa para cancelar."
-    cancel_appointment(appointment, actor=session.user, reason=DEFAULT_CANCELLATION_REASON)
+    cancel_appointment(appointment, actor=session.user,
+                       reason=DEFAULT_CANCELLATION_REASON)
     _reset_session(session)
     return f"Listo, cancelé tu cita. ❌\n\n{_format_appointment_summary(appointment)}"
 
@@ -1103,7 +1156,8 @@ def _start_reschedule_flow(session: ChatSession) -> str:
     _update_session(
         session,
         step="waiting_reschedule_slot_selection",
-        state_data={"appointment_id": appointment.id, "slots": serialized_slots},
+        state_data={"appointment_id": appointment.id,
+                    "slots": serialized_slots},
     )
     return (
         f"Esta es tu cita actual:\n{_format_appointment_summary(appointment)}\n\n"
@@ -1134,7 +1188,8 @@ def _handle_reschedule_slot_selection(session: ChatSession, text: str, state: di
             reason=DEFAULT_RESCHEDULE_REASON,
         )
     except DjangoValidationError:
-        logger.exception("No se pudo reagendar Appointment desde Telegram chatbot")
+        logger.exception(
+            "No se pudo reagendar Appointment desde Telegram chatbot")
         return "Ese horario ya no está disponible 😕\nResponde con otro número de la lista para intentarlo de nuevo."
 
     appointment.refresh_from_db()
@@ -1199,14 +1254,20 @@ def _finalize_booking(session: ChatSession, state: dict) -> str:
 
 def _ensure_client_user(session: ChatSession, state: dict) -> None:
     draft = dict(state.get("client_draft") or {})
-    user = session.user or User.objects.filter(telegram_chat_id=str(session.chat_id)).first()
+    user = session.user or User.objects.filter(
+        telegram_chat_id=str(session.chat_id)).first()
+    if user is None and draft.get("email"):
+        user = User.objects.filter(email__iexact=draft.get("email")).first()
     if user is None:
         user = User.objects.create(
             username=_build_telegram_username(session.chat_id),
             role=User.Role.CLIENT,
             telegram_chat_id=str(session.chat_id),
         )
-        user.set_unusable_password()
+        user.set_password(DEFAULT_AUTOMATIC_USER_PASSWORD)
+        user.save(update_fields=["password"])
+    elif not user.has_usable_password():
+        user.set_password(DEFAULT_AUTOMATIC_USER_PASSWORD)
         user.save(update_fields=["password"])
 
     if draft.get("full_name"):
@@ -1230,11 +1291,11 @@ def _ensure_client_user(session: ChatSession, state: dict) -> None:
 
 def _next_missing_contact_field(user, state: dict) -> str | None:
     draft = dict(state.get("client_draft") or {})
+    if not draft.get("email") and not (user and (getattr(user, "email", "") or "").strip()):
+        return "email"
     for field_name in CONTACT_FIELD_SEQUENCE:
         if field_name == "full_name":
             if draft.get("full_name"):
-                continue
-            if user and (user.first_name or "").strip():
                 continue
         elif field_name == "phone_number":
             if draft.get("phone_number"):
@@ -1249,8 +1310,6 @@ def _next_missing_contact_field(user, state: dict) -> str | None:
         elif field_name == "address":
             if draft.get("address"):
                 continue
-            if user and (getattr(user, "address", "") or "").strip():
-                continue
         return field_name
     return None
 
@@ -1264,17 +1323,20 @@ def _validate_contact_field(field_name: str, value: str) -> str:
     if field_name == "phone_number":
         digits = re.sub(r"\D", "", cleaned)
         if len(digits) < 10 or len(digits) > 15:
-            raise ValueError("Comparte un numero de celular valido, por ejemplo 3001234567 o 573001234567.")
+            raise ValueError(
+                "Comparte un numero de celular valido, por ejemplo 3001234567 o 573001234567.")
         return digits
     if field_name == "email":
         try:
             validate_email(cleaned)
         except Exception as exc:
-            raise ValueError("Comparte un correo valido, por ejemplo nombre@correo.com.") from exc
+            raise ValueError(
+                "Comparte un correo valido, por ejemplo nombre@correo.com.") from exc
         return cleaned.lower()
     if field_name == "address":
         if len(cleaned) < 8:
-            raise ValueError("Comparte una direccion mas completa para poder registrar la cita.")
+            raise ValueError(
+                "Comparte una direccion mas completa para poder registrar la cita.")
         return cleaned
     return cleaned
 
@@ -1292,7 +1354,8 @@ def _recommend_technicians(category: str, zone: str) -> list[dict]:
 def _resolve_auction_category(state: dict) -> Category | None:
     recommendations = state.get("recommendations") or []
     if recommendations:
-        service = Service.objects.select_related("category").filter(pk=recommendations[0].get("service_id")).first()
+        service = Service.objects.select_related("category").filter(
+            pk=recommendations[0].get("service_id")).first()
         if service is not None:
             return service.category
 
@@ -1310,7 +1373,8 @@ def _ensure_session_access(user, session: ChatSession) -> None:
         return
     if session.user_id == user.id:
         return
-    raise PermissionDenied("You do not have permission to access this chat history.")
+    raise PermissionDenied(
+        "You do not have permission to access this chat history.")
 
 
 def _get_upcoming_client_appointment(session: ChatSession) -> Appointment | None:
@@ -1341,9 +1405,11 @@ def _create_chat_lead(session: ChatSession, state: dict, technician: TechnicianP
         service=service,
         client_name=_display_client_name(session.user),
         client_phone=session.user.phone_number or f"telegram:{session.chat_id}",
-        message=state.get("request_text") or f"Solicitud desde Telegram para {service.title}",
+        message=state.get(
+            "request_text") or f"Solicitud desde Telegram para {service.title}",
         category=state.get("categoria") or "",
-        location=ZONE_DISPLAY_NAMES.get(state.get("zona"), state.get("zona") or ""),
+        location=ZONE_DISPLAY_NAMES.get(
+            state.get("zona"), state.get("zona") or ""),
         urgency="normal",
         source=ServiceLead.Source.TELEGRAM,
         metadata={
@@ -1389,8 +1455,10 @@ def _build_recommendation_reply(category: str, location: str | None, recommendat
         lines.append(
             f"{index}. {item['technician_name']} ⭐ {item['score']} pts — responde en ~{item['response_time_minutes']} min"
         )
-    lines.append("\nResponde con el numero del tecnico para ver horarios disponibles.")
-    lines.append("Tambien puedes responder 0 para crear una subasta y recibir ofertas.")
+    lines.append(
+        "\nResponde con el numero del tecnico para ver horarios disponibles.")
+    lines.append(
+        "Tambien puedes responder 0 para crear una subasta y recibir ofertas.")
     return "\n".join(lines)
 
 
@@ -1414,7 +1482,8 @@ def _format_slot_range(slot: dict) -> str:
 
 def _format_appointment_summary(appointment: Appointment) -> str:
     service_name = appointment.service.title if appointment.service_id else "Sin servicio"
-    technician_name = appointment.technician.user.get_full_name() or appointment.technician.user.username
+    technician_name = appointment.technician.user.get_full_name(
+    ) or appointment.technician.user.username
     return f"Cita #{appointment.id} | {service_name} | {technician_name} | {timezone.localtime(appointment.scheduled_start):%Y-%m-%d %H:%M}"
 
 
@@ -1457,7 +1526,8 @@ def _resolve_zone_text(value: str | None) -> str | None:
             return zone_slug
 
     normalized_slug = slugify(f"Barranquilla-{cleaned}")
-    zone = Zone.objects.filter(slug__iexact=normalized_slug, is_active=True).first()
+    zone = Zone.objects.filter(
+        slug__iexact=normalized_slug, is_active=True).first()
     if zone is not None:
         return zone.slug
 
@@ -1481,7 +1551,8 @@ def _resolve_zone_text(value: str | None) -> str | None:
         for keyword in keywords:
             candidates[keyword] = zone_slug
 
-    close_matches = difflib.get_close_matches(normalized, candidates.keys(), n=1, cutoff=0.75)
+    close_matches = difflib.get_close_matches(
+        normalized, candidates.keys(), n=1, cutoff=0.75)
     if close_matches:
         return candidates[close_matches[0]]
 
@@ -1522,7 +1593,8 @@ def _build_telegram_username(chat_id: int) -> str:
 
 
 def _build_frontend_link(path: str, **params) -> str:
-    query = "&".join(f"{key}={value}" for key, value in params.items() if value is not None)
+    query = "&".join(f"{key}={value}" for key,
+                     value in params.items() if value is not None)
     suffix = f"?{query}" if query else ""
     return f"{settings.FRONTEND_URL}{path}{suffix}"
 
@@ -1540,7 +1612,8 @@ def _display_client_name(user) -> str:
 
 
 def send_telegram_message(chat_id: int, text: str):
-    payload = build_telegram_message_payload(chat_id=chat_id, text=text, preview_url=False)
+    payload = build_telegram_message_payload(
+        chat_id=chat_id, text=text, preview_url=False)
     result = TelegramBotClient().send_message(payload)
     if result.error:
         logger.error("Error sending Telegram message: %s", result.error)
