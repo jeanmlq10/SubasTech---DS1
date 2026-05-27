@@ -82,8 +82,14 @@ ZONE_KEYWORDS = {
     "barranquilla-alto-prado": ("alto prado", "prado"),
     "barranquilla-villa-santos": ("villa santos", "villa"),
 }
-YES_CHOICES = {"si", "s", "confirmo", "yes"}
-NO_CHOICES = {"no", "n"}
+YES_CHOICES = {
+    "si", "sí", "s", "confirmo", "yes", "dale", "va", "listo", "claro",
+    "por supuesto", "de acuerdo", "ok", "okay", "adelante", "hagale"
+}
+NO_CHOICES = {
+    "no", "n", "no gracias", "mejor no", "nope", "nel", "para nada",
+    "negativo"
+}
 AUCTION_CHOICES = {"0", "ofertas", "oferta",
                    "subasta", "recibir ofertas", "quiero ofertas"}
 RESET_CHOICES = {"inicio", "menu", "menú", "volver",
@@ -233,13 +239,10 @@ def _is_negative_auction_request(text: str) -> bool:
 
 
 def _is_auction_request(text: str) -> bool:
-    cleaned = normalize_text(text)
+    cleaned = normalize_text(text).strip()
     if _is_negative_auction_request(cleaned):
         return False
-    for choice in AUCTION_CHOICES:
-        if choice in cleaned:
-            return True
-    return False
+    return cleaned in AUCTION_CHOICES
 
 
 def _fallback_to_llm_for_step(session: ChatSession, text: str, default_response: str) -> str:
@@ -458,7 +461,7 @@ def handle_conversation(session: ChatSession, text: str, intent: dict) -> str:
     if step == "waiting_rating":
         return _handle_rating_submission(session, cleaned_text, state)
 
-    if _is_bid_acceptance(cleaned_text):
+    if _is_bid_acceptance(session, cleaned_text):
         return _handle_bid_acceptance(session, cleaned_text)
 
     if accion == "saludo" or lowered in {"/start", "hola", "buenas", "buenos dias"}:
@@ -612,52 +615,67 @@ def _handle_zone_selection(session: ChatSession, text: str, state: dict) -> str:
 
 def _handle_technician_selection(session: ChatSession, text: str, state: dict) -> str:
     recommendations = state.get("recommendations") or []
-    if _is_auction_request(text):
-        return _start_auction_flow(session, state)
-
-    if text.strip().lower() in YES_CHOICES:
-        return _start_auction_flow(session, state)
-
     selected_index = _parse_numeric_choice(text, len(recommendations))
-    if selected_index is None:
-        return _fallback_to_llm_for_step(
+    if selected_index is not None:
+        selected = recommendations[selected_index]
+        technician = TechnicianProfile.objects.filter(
+            pk=selected["technician_id"]).first()
+
+        service = Service.objects.filter(pk=selected["service_id"]).first()
+        if technician is None or service is None:
+            _reset_session(session)
+            return "No pude recuperar la informacion del tecnico seleccionado. Intenta de nuevo."
+
+        slots = get_available_slots(
+            technician=technician,
+            service=service,
+            zone=_find_zone(state.get("zona")),
+            days=DEFAULT_SLOT_DAYS,
+        )[:DEFAULT_SLOT_COUNT]
+        if not slots:
+            return "Ese tecnico no tiene horarios disponibles en los proximos dias. Puedes elegir otro tecnico de la lista."
+
+        _update_session(
             session,
-            text,
-            f"Responde con un numero entre 1 y {len(recommendations)} para escoger tecnico, o 0 para recibir ofertas.",
+            step="waiting_slot_selection",
+            state_data={
+                "request_text": state.get("request_text", ""),
+                "categoria": state.get("categoria"),
+                "zona": state.get("zona"),
+                "selected_service_id": service.id,
+                "selected_technician_id": technician.id,
+                "selected_technician_name": selected["technician_name"],
+                "slots": [_serialize_slot(slot) for slot in slots],
+            },
         )
+        return _build_slots_reply(selected["technician_name"], [_serialize_slot(slot) for slot in slots])
 
-    selected = recommendations[selected_index]
-    technician = TechnicianProfile.objects.filter(
-        pk=selected["technician_id"]).first()
+    cleaned_lower = text.strip().lower()
+    if cleaned_lower in YES_CHOICES:
+        return _start_auction_flow(session, state)
+    if cleaned_lower in AUCTION_CHOICES:
+        return _start_auction_flow(session, state)
 
-    service = Service.objects.filter(pk=selected["service_id"]).first()
-    if technician is None or service is None:
-        _reset_session(session)
-        return "No pude recuperar la informacion del tecnico seleccionado. Intenta de nuevo."
+    intent = extract_intent(text)
+    if intent.get("accion") == "subasta":
+        return _start_auction_flow(session, state)
+    if intent.get("accion") == "consultar":
+        return _auction_explanation_text()
 
-    slots = get_available_slots(
-        technician=technician,
-        service=service,
-        zone=_find_zone(state.get("zona")),
-        days=DEFAULT_SLOT_DAYS,
-    )[:DEFAULT_SLOT_COUNT]
-    if not slots:
-        return "Ese tecnico no tiene horarios disponibles en los proximos dias. Puedes elegir otro tecnico de la lista."
-
-    _update_session(
+    return _fallback_to_llm_for_step(
         session,
-        step="waiting_slot_selection",
-        state_data={
-            "request_text": state.get("request_text", ""),
-            "categoria": state.get("categoria"),
-            "zona": state.get("zona"),
-            "selected_service_id": service.id,
-            "selected_technician_id": technician.id,
-            "selected_technician_name": selected["technician_name"],
-            "slots": [_serialize_slot(slot) for slot in slots],
-        },
+        text,
+        f"Responde con un numero entre 1 y {len(recommendations)} para escoger tecnico, o 0 para recibir ofertas.",
     )
-    return _build_slots_reply(selected["technician_name"], [_serialize_slot(slot) for slot in slots])
+
+
+def _auction_explanation_text() -> str:
+    return (
+        "Una subasta te permite recibir propuestas de varios técnicos en lugar de escoger uno sólo de la lista. "
+        "Así puedes comparar precios, horarios y mensajes de varios especialistas antes de decidir.\n\n"
+        "Si quieres crear una subasta, responde 0, subasta, ofertas o quiero recibir ofertas.\n"
+        "Si prefieres escoger un técnico de la lista, responde con el número correspondiente."
+    )
 
 
 def _handle_slot_booking(session: ChatSession, text: str, state: dict) -> str:
@@ -909,14 +927,31 @@ def _create_auction_from_chat(session: ChatSession, state: dict) -> str:
     )
 
 
-def _is_bid_acceptance(text: str) -> bool:
-    return bool(re.match(r"^\s*acepto\s*:\s*.+", text or "", flags=re.IGNORECASE))
+def _is_bid_acceptance(session: ChatSession, text: str) -> bool:
+    auction = _get_open_auction_for_session(session)
+    if auction is None:
+        return False
+
+    pending_bids = list(
+        Bid.objects.filter(auction=auction, status=Bid.Status.PENDING)
+    )
+    if not pending_bids:
+        return False
+
+    cleaned = (text or "").strip().lower()
+    if re.match(r"^\s*acepto\s*[:\-]?\s*.+", cleaned):
+        return True
+    if any(phrase in cleaned for phrase in ("no acepto", "no me interesa", "rechazo", "mejor no", "no gracias", "nope", "nel", "para nada", "negativo")):
+        return True
+
+    return any(
+        _technician_name_matches(bid, text)
+        for bid in pending_bids
+    )
 
 
 def _handle_bid_acceptance(session: ChatSession, text: str) -> str:
-    match = re.match(r"^\s*acepto\s*:\s*(?P<name>.+?)\s*$",
-                     text, flags=re.IGNORECASE)
-    technician_text = match.group("name") if match else ""
+    cleaned_text = (text or "").strip()
     auction = (
         Auction.objects.select_related("client", "category", "zone")
         .filter(
@@ -936,9 +971,30 @@ def _handle_bid_acceptance(session: ChatSession, text: str) -> str:
         .filter(auction=auction, status=Bid.Status.PENDING)
         .order_by("created_at")
     )
+    if not pending_bids:
+        return "No hay ofertas pendientes para esta subasta. Espera a que los técnicos envíen sus propuestas o crea una nueva subasta."
+
+    lowered = cleaned_text.lower()
+    if any(phrase in lowered for phrase in ("no acepto", "no me interesa", "rechazo", "mejor no", "no gracias", "nope", "nel", "para nada", "negativo")):
+        available_names = ", ".join(_bid_technician_name(
+            bid) for bid in pending_bids) or "sin ofertas pendientes"
+        return (
+            "Entendido, por ahora no acepto ninguna oferta. "
+            f"Ofertas disponibles: {available_names}.\n\n"
+            "Responde ACEPTO: Nombre Tecnico para aceptar una oferta, o dime si quieres ver otras propuestas."
+        )
+
+    match = re.match(r"^\s*acepto\s*[:\-]?\s*(?P<name>.+?)\s*$",
+                     cleaned_text, flags=re.IGNORECASE)
+    technician_text = match.group("name") if match else cleaned_text
+
     matching_bids = [
         bid for bid in pending_bids if _technician_name_matches(bid, technician_text)]
     if not matching_bids:
+        intent = extract_intent(text)
+        if intent.get("accion") == "consultar":
+            return _auction_explanation_text()
+
         available_names = ", ".join(_bid_technician_name(
             bid) for bid in pending_bids) or "sin ofertas pendientes"
         return (

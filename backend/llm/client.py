@@ -9,7 +9,8 @@ logger = logging.getLogger(__name__)
 
 class GeminiIntentClient:
     def __init__(self, api_key: str | None = None):
-        self.api_keys = [api_key] if api_key is not None else getattr(settings, "GEMINI_API_KEYS", [])
+        self.api_keys = [api_key] if api_key is not None else getattr(
+            settings, "GEMINI_API_KEYS", [])
 
     @property
     def is_configured(self) -> bool:
@@ -41,9 +42,21 @@ Si el mensaje es ambiguo o menciona múltiples servicios, elige el
 más probable según el contexto. Si no puedes determinar la categoría 
 con seguridad, usa "otro".
 
+Ejemplos donde la acción debe ser "subasta":
+- "ok inicio la subasta"
+- "dale con la subasta"
+- "quiero recibir ofertas"
+- "ofertas"
+
+Ejemplos donde la acción debe ser "consultar" aunque mencione subasta:
+- "cómo genero la subasta?"
+- "cómo funciona la subasta?"
+- "qué es una subasta?"
+- "quiero saber sobre la subasta"
+
 Responde SOLO con JSON válido, sin texto adicional, sin markdown:
 {{
-  "accion": "agendar|cancelar|reagendar|consultar|saludo|otro",
+  "accion": "agendar|cancelar|reagendar|consultar|saludo|subasta|otro",
   "categoria": "electricista|plomero|cerrajero|pintor|otro|null",
   "urgencia": "alta|media|baja",
   "zona": "nombre del barrio o null",
@@ -71,9 +84,11 @@ Mensaje: {message}
                     break
                 except Exception as exc:
                     last_exc = exc
-                    logger.warning("Gemini call attempt %s failed: %s", attempt, exc)
+                    logger.warning(
+                        "Gemini call attempt %s failed: %s", attempt, exc)
                     if attempt == max_attempts:
-                        logger.warning(f"Gemini key ...{key[-4:]} agotada, probando siguiente")
+                        logger.warning(
+                            f"Gemini key ...{key[-4:]} agotada, probando siguiente")
                         break
                     time.sleep(delay)
                     delay *= 2

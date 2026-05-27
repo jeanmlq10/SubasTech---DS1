@@ -14,11 +14,14 @@ CATEGORY_KEYWORDS = {
     "cerrajero": ["cerrajero", "cerradura", "llave", "puerta", "chapa", "candado", "seguro"],
     "pintor": ["pintor", "pintura", "pintar", "pared", "fachada", "estuco", "barniz"],
 }
-URGENCY_KEYWORDS = ["urgente", "ya", "emergencia", "inmediato", "rapido", "hoy", "ahora"]
+URGENCY_KEYWORDS = ["urgente", "ya", "emergencia",
+                    "inmediato", "rapido", "hoy", "ahora"]
 GREETING_KEYWORDS = ["hola", "buenas", "buenos dias", "/start"]
-RESET_KEYWORDS = ["inicio", "menu", "menú", "volver", "reiniciar", "empezar", "cancelar flujo"]
+RESET_KEYWORDS = ["inicio", "menu", "menú", "volver",
+                  "reiniciar", "empezar", "cancelar flujo"]
 CANCEL_KEYWORDS = ["cancelar", "cancelacion", "cancelo"]
-RESCHEDULE_KEYWORDS = ["reagendar", "reprogramar", "cambiar la cita", "mover la cita"]
+RESCHEDULE_KEYWORDS = ["reagendar", "reprogramar",
+                       "cambiar la cita", "mover la cita"]
 LOCATION_PATTERNS = [
     r"\ben\s+([\w\s-]+)",
     r"\bpor\s+([\w\s-]+)",
@@ -55,9 +58,11 @@ def interpret_message(message: str, *, client: GeminiIntentClient | None = None)
         return _normalize_result(payload, provider="gemini")
     except Exception as exc:
         if "429" in str(exc):
-            logger.error("🚨 GEMINI QUOTA EXHAUSTED - Replace API key in .env [GEMINI_API_KEY]")
+            logger.error(
+                "🚨 GEMINI QUOTA EXHAUSTED - Replace API key in .env [GEMINI_API_KEY]")
         else:
-            logger.warning("LLM provider failed, using rules fallback: %s", exc)
+            logger.warning(
+                "LLM provider failed, using rules fallback: %s", exc)
         return rules_result
 
 
@@ -115,7 +120,8 @@ def rules_fallback(message: str) -> dict:
             location = match.group(1).split(".", 1)[0].split(",", 1)[0].strip()
             break
 
-    urgency = "alta" if any(keyword in text_norm for keyword in URGENCY_KEYWORDS) else "baja"
+    urgency = "alta" if any(
+        keyword in text_norm for keyword in URGENCY_KEYWORDS) else "baja"
     if any(keyword in text_norm for keyword in GREETING_KEYWORDS):
         accion = "saludo"
     elif any(keyword in text_norm for keyword in CANCEL_KEYWORDS):
@@ -147,7 +153,8 @@ def _normalize_result(payload: dict, *, provider: str) -> dict:
 
 
 def _coerce_action(value) -> str:
-    allowed = {"agendar", "cancelar", "reagendar", "consultar", "saludo", "otro"}
+    allowed = {"agendar", "cancelar", "reagendar",
+               "consultar", "saludo", "subasta", "otro"}
     normalized = str(value or "").strip().lower()
     return normalized if normalized in allowed else "otro"
 
